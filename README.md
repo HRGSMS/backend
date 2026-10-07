@@ -31,5 +31,16 @@ The initializer is safe to run more than once because it uses
 `CREATE TABLE IF NOT EXISTS`. It creates the tables in foreign-key dependency
 order.
 
+Seed the initialized database with representative SkyNest Hotels data:
+
+```bash
+npm run db:seed
+```
+
+The seed script runs in a transaction and replaces the existing rows in these
+tables with deterministic sample data. It creates 3 branches, 12 rooms, 6
+services, 5 guests, 8 bookings, service usage records, and 5 payments
+including partial payments.
+
 check 
 http://localhost:4000/api/health
