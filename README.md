@@ -42,5 +42,21 @@ tables with deterministic sample data. It creates 3 branches, 12 rooms, 6
 services, 5 guests, 8 bookings, service usage records, and 5 payments
 including partial payments.
 
+Destroy the configured database, including all its tables and data:
+
+```bash
+npm run db:destroy
+```
+
+Destroy and rebuild the configured database, including the schema and seed
+data:
+
+```bash
+npm run db:recreate
+```
+
+Both commands use the database configured by `DB_NAME` and reject names that
+contain characters outside letters, numbers, and underscores.
+
 check 
 http://localhost:4000/api/health

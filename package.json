@@ -9,6 +9,8 @@
     "start": "node src/server.js",
     "db:init": "node db/migrate.js",
     "db:seed": "node db/seed.js",
+    "db:destroy": "node db/destroy.js",
+    "db:recreate": "node db/recreate.js && npm run db:init && npm run db:seed",
     "migrate": "node db/migrate.js",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.js\"",

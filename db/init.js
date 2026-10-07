@@ -138,6 +138,14 @@ const tableDefinitions = [
   `,
 ];
 
+/**
+ * Creates the application tables in foreign-key dependency order.
+ *
+ * Existing tables are preserved because each statement uses
+ * CREATE TABLE IF NOT EXISTS.
+ *
+ * @returns {Promise<void>} Resolves after every table has been created.
+ */
 export async function initializeDatabase() {
   const connection = await pool.getConnection();
 

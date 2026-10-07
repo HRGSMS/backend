@@ -235,6 +235,15 @@ const payments = [
   [5, 6, '2026-10-01 14:00:00', 'Card', 65000],
 ];
 
+/**
+ * Inserts a collection of parameterized rows into one table.
+ *
+ * @param {import('mysql2/promise').PoolConnection} connection Active transaction connection.
+ * @param {string} table Destination table name.
+ * @param {string[]} columns Destination column names.
+ * @param {unknown[][]} rows Values to insert, in column order.
+ * @returns {Promise<void>} Resolves after all rows have been inserted.
+ */
 const insertRows = async (connection, table, columns, rows) => {
   const placeholders = columns.map(() => '?').join(', ');
   const sql = `INSERT INTO \`${table}\` (${columns.map((column) => `\`${column}\``).join(', ')}) VALUES (${placeholders})`;
@@ -244,6 +253,14 @@ const insertRows = async (connection, table, columns, rows) => {
   }
 };
 
+/**
+ * Replaces the application data with the deterministic SkyNest sample dataset.
+ *
+ * All deletes and inserts run in one transaction. Any failure rolls the
+ * transaction back so the database is not left partially seeded.
+ *
+ * @returns {Promise<void>} Resolves after the seed data has been committed.
+ */
 export async function seedDatabase() {
   const connection = await pool.getConnection();
 
