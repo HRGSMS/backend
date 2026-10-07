@@ -21,5 +21,15 @@ npm install
 npm start
 ```
 
+Initialize the database tables after creating the database configured in `.env`:
+
+```bash
+npm run db:init
+```
+
+The initializer is safe to run more than once because it uses
+`CREATE TABLE IF NOT EXISTS`. It creates the tables in foreign-key dependency
+order.
+
 check 
 http://localhost:4000/api/health
