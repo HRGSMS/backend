@@ -10,8 +10,74 @@ const connectionOptions = {
 	multipleStatements: false,
 };
 
+// BetterAuth required tables
+const authSchemaStatements = [
+	// Users table (BetterAuth standard)
+	`CREATE TABLE IF NOT EXISTS \`user\` (
+		id VARCHAR(36) PRIMARY KEY,
+		name VARCHAR(255) NOT NULL,
+		email VARCHAR(255) NOT NULL,
+		emailVerified BOOLEAN NOT NULL DEFAULT FALSE,
+		image VARCHAR(255),
+		role VARCHAR(50) NOT NULL DEFAULT 'FrontDesk',
+		branchId INT,
+		createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uq_user_email (email),
+		KEY idx_user_branch (branchId),
+		CONSTRAINT fk_user_branch FOREIGN KEY (branchId) REFERENCES Branch (BranchID)
+	) ENGINE=InnoDB`,
+
+	// Sessions table (BetterAuth standard)
+	`CREATE TABLE IF NOT EXISTS \`session\` (
+		id VARCHAR(36) PRIMARY KEY,
+		expiresAt DATETIME NOT NULL,
+		token VARCHAR(255) NOT NULL,
+		createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		ipAddress VARCHAR(45),
+		userAgent TEXT,
+		userId VARCHAR(36) NOT NULL,
+		UNIQUE KEY uq_session_token (token),
+		KEY idx_session_user (userId),
+		CONSTRAINT fk_session_user FOREIGN KEY (userId) REFERENCES \`user\` (id) ON DELETE CASCADE
+	) ENGINE=InnoDB`,
+
+	// Accounts table (BetterAuth standard for OAuth)
+	`CREATE TABLE IF NOT EXISTS \`account\` (
+		id VARCHAR(36) PRIMARY KEY,
+		accountId VARCHAR(255) NOT NULL,
+		providerId VARCHAR(255) NOT NULL,
+		userId VARCHAR(36) NOT NULL,
+		accessToken TEXT,
+		refreshToken TEXT,
+		idToken TEXT,
+		accessTokenExpiresAt DATETIME,
+		refreshTokenExpiresAt DATETIME,
+		scope TEXT,
+		password VARCHAR(255),
+		createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		KEY idx_account_user (userId),
+		UNIQUE KEY uq_account_provider (providerId, accountId),
+		CONSTRAINT fk_account_user FOREIGN KEY (userId) REFERENCES \`user\` (id) ON DELETE CASCADE
+	) ENGINE=InnoDB`,
+
+	// Verification tokens table (BetterAuth standard)
+	`CREATE TABLE IF NOT EXISTS \`verification\` (
+		id VARCHAR(36) PRIMARY KEY,
+		identifier VARCHAR(255) NOT NULL,
+		value VARCHAR(255) NOT NULL,
+		expiresAt DATETIME NOT NULL,
+		createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uq_verification_identifier_value (identifier, value)
+	) ENGINE=InnoDB`,
+];
+
 // Create the tables in dependency order so every foreign key is valid.
 const schemaStatements = [
+	...authSchemaStatements,
 	`CREATE TABLE IF NOT EXISTS Branch (
 		BranchID INT PRIMARY KEY,
 		Name VARCHAR(100) NOT NULL,
@@ -148,6 +214,26 @@ const schemaStatements = [
 
 // Seed a complete demonstration dataset; duplicate-key updates make reruns safe.
 const seedStatements = [
+	// Auth users seed - run after tables are created
+	`INSERT INTO \`user\` (id, name, email, emailVerified, role, branchId, createdAt) VALUES
+		('usr_frontdesk_001', 'Front Desk User', 'frontdesk@hotel.com', TRUE, 'FrontDesk', 1, NOW()),
+		('usr_manager_001', 'Hotel Manager', 'manager@hotel.com', TRUE, 'Manager', 1, NOW()),
+		('usr_admin_001', 'System Admin', 'admin@hotel.com', TRUE, 'Admin', NULL, NOW())
+		ON DUPLICATE KEY UPDATE
+			name = VALUES(name),
+			emailVerified = VALUES(emailVerified),
+			role = VALUES(role),
+			branchId = VALUES(branchId)`,
+
+	// Passwords for auth accounts (stored in account table)
+	`INSERT INTO \`account\` (id, accountId, providerId, userId, password, createdAt) VALUES
+		('acc_frontdesk_001', 'frontdesk@hotel.com', 'email', 'usr_frontdesk_001', '$2a$10$XOp7ZQZ9K7eV5YqJ8K9L1uJ5YqJ8K9L1uJ5YqJ8K9L1uJ5YqJ8K9L1', NOW()),
+		('acc_manager_001', 'manager@hotel.com', 'email', 'usr_manager_001', '$2a$10$XOp7ZQZ9K7eV5YqJ8K9L1uJ5YqJ8K9L1uJ5YqJ8K9L1uJ5YqJ8K9L1', NOW()),
+		('acc_admin_001', 'admin@hotel.com', 'email', 'usr_admin_001', '$2a$10$XOp7ZQZ9K7eV5YqJ8K9L1uJ5YqJ8K9L1uJ5YqJ8K9L1uJ5YqJ8K9L1', NOW())
+		ON DUPLICATE KEY UPDATE
+			password = VALUES(password),
+			updatedAt = NOW()`,
+
 	`INSERT INTO Branch (BranchID, Name, LocationCity) VALUES
 		(1, 'SkyNest Colombo', 'Colombo'), (2, 'SkyNest Kandy', 'Kandy'), (3, 'SkyNest Galle', 'Galle')
 		ON DUPLICATE KEY UPDATE Name = VALUES(Name), LocationCity = VALUES(LocationCity)`,
