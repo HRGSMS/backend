@@ -339,5 +339,49 @@ npm run db:recreate
 Both commands use the database configured by `DB_NAME` and reject names that
 contain characters outside letters, numbers, and underscores.
 
+## API tests
+
+Start the backend and ensure the database has been initialized and seeded:
+
+```bash
+npm start
+```
+
+In another terminal, run the full HTTP API test suite:
+
+```bash
+npm run api:test
+```
+
+The test runner uses the three seeded development accounts, keeps separate
+session cookies for each role, tests admin-only operations, checks all data and
+report endpoints, verifies that database IDs are not exposed, and prints
+color-coded results with a pass/fail summary. Set `API_URL` to test another
+server:
+
+```bash
+API_URL=http://localhost:4000 npm run api:test
+```
+
+The default `normal` log level prints one concise result for each request. Use
+the following options when diagnosing a failed endpoint:
+
+```bash
+# Print each request, response status, headers, and response body
+npm run api:test -- --verbose
+
+# Print the same request/response trace plus error stack traces
+npm run api:test -- --debug
+
+# Print only the final pass/fail summary
+npm run api:test -- --quiet
+```
+
+The equivalent `API_TEST_LOG_LEVEL` values are `quiet`, `normal`, `verbose`,
+and `debug`. Command-line options take precedence over the environment
+variable. Request passwords, cookies, authorization values, and token-like
+fields are redacted from verbose and debug output. Long response bodies are
+truncated to keep logs readable.
+
 check
 http://localhost:4000/api/health
