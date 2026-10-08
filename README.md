@@ -15,6 +15,7 @@ DB_NAME=hrgsms
 PORT=4000
 BETTER_AUTH_URL=http://localhost:4000
 BETTER_AUTH_SECRET=your_generated_32_character_or_longer_secret
+FRONTEND_URL=http://localhost:5173
 ```
 
 The server checks the MySQL connection before listening:
@@ -201,6 +202,104 @@ const users = await response.json();
 Admin requests made without a valid admin session return an authorization
 error. Managers and front-desk users can sign in and access their session, but
 cannot create users, change roles, or list users.
+
+## Data APIs
+
+All data APIs require an authenticated Better Auth session cookie. Frontend
+requests must use `credentials: 'include'`:
+
+```js
+const response = await fetch('http://localhost:4000/api/rooms', {
+  credentials: 'include',
+});
+const result = await response.json();
+```
+
+The backend returns successful collection responses in the form
+`{ "data": [...] }`. Unauthenticated requests receive HTTP `401`.
+
+### Reference data
+
+```text
+GET /api/branches
+GET /api/room-types
+GET /api/amenities
+GET /api/services
+GET /api/guests
+```
+
+Collection endpoints support pagination:
+
+```text
+GET /api/guests?limit=20&offset=0
+```
+
+`limit` is capped at 100.
+
+### Rooms
+
+```text
+GET /api/rooms
+GET /api/rooms?available_from=2026-10-20&available_to=2026-10-23
+```
+
+The availability query excludes rooms with an overlapping `Booked` or
+`Checked-In` booking. Dates are interpreted as an exclusive end interval.
+
+### Bookings
+
+```text
+GET /api/bookings
+GET /api/bookings?status=Checked-In
+```
+
+Database primary-key IDs are intentionally not returned by these APIs and
+cannot be used as query parameters. Use human-readable values such as
+booking status, guest email, branch name, room number, and date ranges.
+
+### Reports
+
+The report endpoints query database views created by `npm run db:init`:
+
+- `report_occupancy`
+- `report_guest_billing`
+- `report_service_usage`
+- `report_revenue`
+- `report_top_services`
+
+The views keep report joins and calculations in the database while allowing
+the API to apply request-specific date filters.
+
+Room occupancy for a date interval:
+
+```text
+GET /api/reports/occupancy?from=2026-10-01&to=2026-10-31
+```
+
+Guest billing and outstanding balances:
+
+```text
+GET /api/reports/billing
+```
+
+Service usage grouped by room and service:
+
+```text
+GET /api/reports/service-usage
+GET /api/reports/service-usage?from=2026-10-01&to=2026-11-01
+```
+
+Revenue by branch for a date interval:
+
+```text
+GET /api/reports/revenue?from=2026-10-01&to=2026-11-01
+```
+
+Top-used services and their revenue:
+
+```text
+GET /api/reports/top-services
+```
 
 The initial accounts are:
 
