@@ -15,6 +15,7 @@ DB_NAME=hrgsms
 PORT=4000
 BETTER_AUTH_URL=http://localhost:4000
 BETTER_AUTH_SECRET=your_generated_32_character_or_longer_secret
+FRONTEND_URL=http://localhost:5173
 ```
 
 The server checks the MySQL connection before listening:
@@ -202,6 +203,104 @@ Admin requests made without a valid admin session return an authorization
 error. Managers and front-desk users can sign in and access their session, but
 cannot create users, change roles, or list users.
 
+## Data APIs
+
+All data APIs require an authenticated Better Auth session cookie. Frontend
+requests must use `credentials: 'include'`:
+
+```js
+const response = await fetch('http://localhost:4000/api/rooms', {
+  credentials: 'include',
+});
+const result = await response.json();
+```
+
+The backend returns successful collection responses in the form
+`{ "data": [...] }`. Unauthenticated requests receive HTTP `401`.
+
+### Reference data
+
+```text
+GET /api/branches
+GET /api/room-types
+GET /api/amenities
+GET /api/services
+GET /api/guests
+```
+
+Collection endpoints support pagination:
+
+```text
+GET /api/guests?limit=20&offset=0
+```
+
+`limit` is capped at 100.
+
+### Rooms
+
+```text
+GET /api/rooms
+GET /api/rooms?available_from=2026-10-20&available_to=2026-10-23
+```
+
+The availability query excludes rooms with an overlapping `Booked` or
+`Checked-In` booking. Dates are interpreted as an exclusive end interval.
+
+### Bookings
+
+```text
+GET /api/bookings
+GET /api/bookings?status=Checked-In
+```
+
+Database primary-key IDs are intentionally not returned by these APIs and
+cannot be used as query parameters. Use human-readable values such as
+booking status, guest email, branch name, room number, and date ranges.
+
+### Reports
+
+The report endpoints query database views created by `npm run db:init`:
+
+- `report_occupancy`
+- `report_guest_billing`
+- `report_service_usage`
+- `report_revenue`
+- `report_top_services`
+
+The views keep report joins and calculations in the database while allowing
+the API to apply request-specific date filters.
+
+Room occupancy for a date interval:
+
+```text
+GET /api/reports/occupancy?from=2026-10-01&to=2026-10-31
+```
+
+Guest billing and outstanding balances:
+
+```text
+GET /api/reports/billing
+```
+
+Service usage grouped by room and service:
+
+```text
+GET /api/reports/service-usage
+GET /api/reports/service-usage?from=2026-10-01&to=2026-11-01
+```
+
+Revenue by branch for a date interval:
+
+```text
+GET /api/reports/revenue?from=2026-10-01&to=2026-11-01
+```
+
+Top-used services and their revenue:
+
+```text
+GET /api/reports/top-services
+```
+
 The initial accounts are:
 
 | Role       | Email                 | Password       |
@@ -239,6 +338,50 @@ npm run db:recreate
 
 Both commands use the database configured by `DB_NAME` and reject names that
 contain characters outside letters, numbers, and underscores.
+
+## API tests
+
+Start the backend and ensure the database has been initialized and seeded:
+
+```bash
+npm start
+```
+
+In another terminal, run the full HTTP API test suite:
+
+```bash
+npm run api:test
+```
+
+The test runner uses the three seeded development accounts, keeps separate
+session cookies for each role, tests admin-only operations, checks all data and
+report endpoints, verifies that database IDs are not exposed, and prints
+color-coded results with a pass/fail summary. Set `API_URL` to test another
+server:
+
+```bash
+API_URL=http://localhost:4000 npm run api:test
+```
+
+The default `normal` log level prints one concise result for each request. Use
+the following options when diagnosing a failed endpoint:
+
+```bash
+# Print each request, response status, headers, and response body
+npm run api:test -- --verbose
+
+# Print the same request/response trace plus error stack traces
+npm run api:test -- --debug
+
+# Print only the final pass/fail summary
+npm run api:test -- --quiet
+```
+
+The equivalent `API_TEST_LOG_LEVEL` values are `quiet`, `normal`, `verbose`,
+and `debug`. Command-line options take precedence over the environment
+variable. Request passwords, cookies, authorization values, and token-like
+fields are redacted from verbose and debug output. Long response bodies are
+truncated to keep logs readable.
 
 check
 http://localhost:4000/api/health

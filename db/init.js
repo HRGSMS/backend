@@ -138,6 +138,100 @@ const tableDefinitions = [
   `,
 ];
 
+const viewDefinitions = [
+  `
+    CREATE OR REPLACE VIEW \`report_occupancy\` AS
+    SELECT
+      r.room_id,
+      r.room_number,
+      b.branch_id,
+      b.name AS branch_name,
+      rt.type_name,
+      bk.booking_id,
+      bk.check_in_time,
+      bk.check_out_time,
+      bk.booking_status
+    FROM room r
+    JOIN branch b ON b.branch_id = r.branch_id
+    JOIN room_type rt ON rt.room_type_id = r.room_type_id
+    LEFT JOIN booking_room br ON br.room_id = r.room_id
+    LEFT JOIN booking bk ON bk.booking_id = br.booking_id
+  `,
+  `
+    CREATE OR REPLACE VIEW \`report_guest_billing\` AS
+    SELECT
+      b.booking_id,
+      b.guest_id,
+      CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
+      b.booking_status,
+      b.payment_status,
+      b.total_charge,
+      COALESCE(SUM(p.amount), 0) AS paid_amount,
+      b.total_charge - COALESCE(SUM(p.amount), 0) AS calculated_outstanding_amount
+    FROM booking b
+    JOIN guest g ON g.guest_id = b.guest_id
+    LEFT JOIN payment p ON p.booking_id = b.booking_id
+    GROUP BY
+      b.booking_id,
+      b.guest_id,
+      g.first_name,
+      g.last_name,
+      b.booking_status,
+      b.payment_status,
+      b.total_charge
+  `,
+  `
+    CREATE OR REPLACE VIEW \`report_service_usage\` AS
+    SELECT
+      su.usage_id,
+      su.usage_time,
+      su.booking_id,
+      su.room_id,
+      r.room_number,
+      su.service_id,
+      sc.service_name,
+      su.quantity,
+      su.price_at_usage,
+      su.quantity * su.price_at_usage AS line_total
+    FROM service_usage su
+    JOIN room r ON r.room_id = su.room_id
+    JOIN service_catalogue sc ON sc.service_id = su.service_id
+  `,
+  `
+    CREATE OR REPLACE VIEW \`report_revenue\` AS
+    SELECT DISTINCT
+      br.branch_id,
+      br.name AS branch_name,
+      b.booking_id,
+      b.check_in_time,
+      b.check_out_time,
+      b.total_charge AS room_and_tax_revenue,
+      COALESCE((
+        SELECT SUM(su.quantity * su.price_at_usage)
+        FROM service_usage su
+        WHERE su.booking_id = b.booking_id
+      ), 0) AS service_revenue
+    FROM branch br
+    JOIN room r ON r.branch_id = br.branch_id
+    JOIN booking_room booking_room_for_branch
+      ON booking_room_for_branch.room_id = r.room_id
+    JOIN booking b ON b.booking_id = booking_room_for_branch.booking_id
+    WHERE b.booking_status <> 'Cancelled'
+  `,
+  `
+    CREATE OR REPLACE VIEW \`report_top_services\` AS
+    SELECT
+      sc.service_id,
+      sc.service_name,
+      SUM(su.quantity) AS total_quantity,
+      COUNT(DISTINCT su.booking_id) AS booking_count,
+      SUM(su.quantity * su.price_at_usage) AS total_revenue
+    FROM service_catalogue sc
+    JOIN service_usage su ON su.service_id = sc.service_id
+    GROUP BY sc.service_id, sc.service_name
+  `,
+];
+
 /**
  * Creates the application tables in foreign-key dependency order.
  *
@@ -151,6 +245,10 @@ export async function initializeDatabase() {
 
   try {
     for (const definition of tableDefinitions) {
+      await connection.query(definition);
+    }
+
+    for (const definition of viewDefinitions) {
       await connection.query(definition);
     }
 
