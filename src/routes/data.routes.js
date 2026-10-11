@@ -236,7 +236,57 @@ router.post('/calculate-bill', async (req, res, next) => {
     connection?.release();
   }
 });
-///
+
+//Booking cancellation - With trigger
+router.post('/cancel-booking', async (req, res, next) => {
+  const bookingId = req.body?.booking_id;
+  if (!Number.isInteger(bookingId) || bookingId <= 0 || bookingId > 1000000) {
+    res.status(400).json({ error: 'booking_id must be an integer between 1 and 1000000' });
+    return;
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    // The cancellation procedure also recalculates the bill.
+    await connection.execute('CALL sp_cancel_booking(?)', [bookingId]);
+    const [rows] = await connection.execute(
+      `SELECT booking_id, booking_status, cancellation_time, cancellation_rule_id,
+        cancellation_fee, cancellation_tax_amount, cancellation_charge_services,
+        total_charge, total_tax_amount, outstanding_amount, credit_amount, payment_status
+       FROM booking WHERE booking_id = ?`,
+      [bookingId],
+    );
+    await connection.commit();
+    res.json({ data: rows[0] });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        next(rollbackError);
+        return;
+      }
+    }
+    if (error.sqlState === '45000') {
+      const statusByMessage = new Map([
+        ['Booking not found', 404],
+        ['Only Booked reservations can be cancelled', 409],
+        ['Cancellation policy is not configured for this notice period', 409],
+      ]);
+      const status = statusByMessage.get(error.sqlMessage);
+      if (status) {
+        res.status(status).json({ error: error.sqlMessage });
+        return;
+      }
+    }
+    next(error);
+  } finally {
+    connection?.release();
+  }
+});
+// End of booking cancellation - With trigger
 router.get('/reports/occupancy', async (req, res, next) => {
   try {
     const from = parseDate(req.query.from, 'from');

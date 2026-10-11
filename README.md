@@ -111,6 +111,28 @@ Body(Whule logged in):
   "booking_id": 1
 }
 ```
+### Cancel booking
+
+Requires a logged-in session. Replace `1` with an existing booking ID.
+
+```http
+POST http://localhost:4000/api/cancel-booking
+Content-Type: application/json
+
+{
+  "booking_id": 1
+}
+```
+
+Cancels a `Booked` reservation using the configured cancellation policy and
+recalculates its bill. The response includes cancellation fees, taxes, and
+updated billing values under `data`.
+
+- `400`: Invalid booking ID (must be an integer between 1 and 1000000).
+- `401`: Authentication required.
+- `404`: Booking not found.
+- `409`: Booking cannot be cancelled or no matching cancellation policy exists.
+
 ### Get the current session
 
 ```http
