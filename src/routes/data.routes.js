@@ -81,10 +81,96 @@ router.get('/services', (req, res, next) =>
     res,
     next,
     'service_catalogue',
-    'service_name, service_description, current_price, price_update_time',
+    'service_id, service_name, service_description, current_price, price_update_time',
     'service_id',
   ),
 );
+
+// Update a service's current price.
+// Only authenticated administrators may change catalogue prices.
+router.patch('/services/:id/price', async (req, res, next) => {
+  try {
+    // Verify the caller's role.
+    if (req.auth?.user?.role !== 'admin') {
+      res.status(403).json({
+        error: 'Only administrators can update service prices',
+      });
+      return;
+    }
+
+    // Validate the service ID.
+    const serviceId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(serviceId) || serviceId <= 0) {
+      res.status(400).json({
+        error: 'Service ID must be a positive integer',
+      });
+      return;
+    }
+
+    // Require a valid, non-negative price.
+    const { price } = req.body ?? {};
+
+    if (
+      price === undefined ||
+      price === null ||
+      price === '' ||
+      typeof price === 'boolean' ||
+      !Number.isFinite(Number(price)) ||
+      Number(price) < 0
+    ) {
+      res.status(400).json({
+        error: 'Price must be a valid non-negative number',
+      });
+      return;
+    }
+
+    const numericPrice = Number(price);
+
+    // Accept at most two decimal places.
+    if (Math.round(numericPrice * 100) !== numericPrice * 100) {
+      res.status(400).json({
+        error: 'Price must have at most two decimal places',
+      });
+      return;
+    }
+
+    // Update the catalogue without modifying historical usage records.
+    const [result] = await pool.execute(
+      `UPDATE service_catalogue
+       SET current_price = ?, price_update_time = CURRENT_TIMESTAMP
+       WHERE service_id = ?`,
+      [numericPrice, serviceId],
+    );
+
+    if (result.affectedRows === 0) {
+      const [rows] = await pool.execute(
+        'SELECT service_id FROM service_catalogue WHERE service_id = ?',
+        [serviceId],
+      );
+
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'Service not found' });
+        return;
+      }
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT service_id, service_name, service_description,
+              current_price, price_update_time
+       FROM service_catalogue
+       WHERE service_id = ?`,
+      [serviceId],
+    );
+
+    res.json({
+      message: 'Service price updated successfully',
+      data: rows[0],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/service-catalogue', async (req, res, next) => {
   try {
