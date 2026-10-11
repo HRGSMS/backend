@@ -1,4 +1,5 @@
 import { pool } from '../src/config/db.js';
+import { installTriggers } from './triggers.js';
 
 const tableDefinitions = [
   `
@@ -240,13 +241,15 @@ const viewDefinitions = [
  *
  * @returns {Promise<void>} Resolves after every table has been created.
  */
-export async function initializeDatabase() {
-  const connection = await pool.getConnection();
+export async function initializeDatabase(database = pool) {
+  const connection = await database.getConnection();
 
   try {
     for (const definition of tableDefinitions) {
       await connection.query(definition);
     }
+
+    await installTriggers(connection);
 
     for (const definition of viewDefinitions) {
       await connection.query(definition);
@@ -255,6 +258,6 @@ export async function initializeDatabase() {
     console.log('Database tables initialized');
   } finally {
     connection.release();
-    await pool.end();
+    await database.end();
   }
 }

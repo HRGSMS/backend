@@ -11,6 +11,7 @@
     "db:seed": "node db/seed.js",
     "db:destroy": "node db/destroy.js",
     "db:recreate": "node db/recreate.js && npm run db:init && npm run auth:migrate && npm run db:seed && npm run auth:seed",
+    "db:test-triggers": "node db/test-triggers.js",
     "auth:migrate": "npx auth@latest migrate",
     "auth:seed": "node db/seed-auth.js",
     "api:test": "node scripts/api-tests.js",

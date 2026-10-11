@@ -195,6 +195,48 @@ router.get('/bookings', async (req, res, next) => {
   }
 });
 
+//TESTING TRIGGERS AND PROCEDURES 
+
+router.post('/calculate-bill', async (req, res, next) => {
+  const bookingId = req.body?.booking_id;
+  if (!Number.isInteger(bookingId) || bookingId <= 0 || bookingId > 1000000) {
+    res.status(400).json({ error: 'booking_id must be a positive integer' });
+    return;
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    // The procedure locks the booking until this transaction is committed.
+    await connection.beginTransaction();
+    await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
+    const [rows] = await connection.execute(
+      `SELECT booking_id, total_charge, total_tax_amount,
+        outstanding_amount, credit_amount, payment_status
+       FROM booking WHERE booking_id = ?`,
+      [bookingId],
+    );
+    await connection.commit();
+    res.json({ data: rows[0] });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        next(rollbackError);
+        return;
+      }
+    }
+    if (error.sqlState === '45000' && error.sqlMessage === 'Booking not found') {
+      res.status(404).json({ error: 'Booking not found' });
+      return;
+    }
+    next(error);
+  } finally {
+    connection?.release();
+  }
+});
+///
 router.get('/reports/occupancy', async (req, res, next) => {
   try {
     const from = parseDate(req.query.from, 'from');

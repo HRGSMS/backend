@@ -47,7 +47,10 @@ password hashing:
 ```bash
 npm run auth:seed
 ```
-
+Testing Current implemented triggers 
+```bash
+npm run db:test-triggers
+```
 Authentication endpoints are available under `/api/auth`. The configured
 Better Auth admin plugin disables public sign-up and allows only users with
 the `admin` role to create users or change roles.
@@ -96,6 +99,18 @@ The response contains the authenticated user and session information. Store
 the cookie through the browser; do not store the password or session token in
 local storage.
 
+
+### Calculate - Bill
+```
+POST http://localhost:4000/api/calculate-bill
+```
+Content-Type: application/json
+```
+Body(Whule logged in): 
+{
+  "booking_id": 1
+}
+```
 ### Get the current session
 
 ```http
