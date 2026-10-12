@@ -152,6 +152,7 @@ const tableDefinitions = [
       \`quantity\` INT,
       \`price_at_usage\` DECIMAL(10, 2),
       \`tax_rate_at_usage\` DECIMAL(10, 4),
+      \`status\` VARCHAR(20) NOT NULL DEFAULT 'Pending',
       PRIMARY KEY (\`usage_id\`),
       FOREIGN KEY (\`room_id\`) REFERENCES \`room\`(\`room_id\`),
       FOREIGN KEY (\`booking_id\`) REFERENCES \`booking\`(\`booking_id\`),

@@ -5,9 +5,7 @@ const router = Router();
 
 router.use((req, res, next) => {
   const identifierQuery = Object.keys(req.query).find(
-    (key) =>
-      !key.endsWith('_public_id') &&
-      (key === 'id' || key === 'ids' || key.endsWith('_id')),
+    (key) => !key.endsWith('_public_id') && (key === 'id' || key === 'ids' || key.endsWith('_id')),
   );
 
   if (identifierQuery) {
@@ -74,7 +72,14 @@ router.get('/room-types', (req, res, next) =>
 );
 
 router.get('/amenities', (req, res, next) =>
-  listTable(req, res, next, 'amenity', 'public_id, amenity_name, amenity_description', 'amenity_id'),
+  listTable(
+    req,
+    res,
+    next,
+    'amenity',
+    'public_id, amenity_name, amenity_description',
+    'amenity_id',
+  ),
 );
 
 router.get('/services', (req, res, next) =>
@@ -200,7 +205,139 @@ router.get('/bookings', async (req, res, next) => {
   }
 });
 
-//TESTING TRIGGERS AND PROCEDURES 
+router.get('/service-request-options', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        b.public_id AS booking_public_id,
+        g.public_id AS guest_public_id,
+        CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
+        r.public_id AS room_public_id,
+        r.room_number,
+        b.booking_status
+      FROM booking b
+      JOIN guest g ON g.guest_id = b.guest_id
+      JOIN booking_room br ON br.booking_id = b.booking_id
+      JOIN room r ON r.room_id = br.room_id
+      WHERE b.booking_status = 'Checked-In'
+      ORDER BY g.first_name, g.last_name, r.room_number
+    `);
+
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/service-requests', async (req, res, next) => {
+  try {
+    const filters = [];
+    const parameters = [];
+    const publicIdFilters = [
+      ['booking_public_id', 'b.public_id'],
+      ['room_public_id', 'r.public_id'],
+      ['service_public_id', 'sc.public_id'],
+    ];
+
+    for (const [queryName, column] of publicIdFilters) {
+      if (req.query[queryName] !== undefined && req.query[queryName] !== '') {
+        if (typeof req.query[queryName] !== 'string' || req.query[queryName].length !== 36) {
+          const error = new Error(`${queryName} must be a UUID`);
+          error.statusCode = 400;
+          throw error;
+        }
+        filters.push(`${column} = ?`);
+        parameters.push(req.query[queryName]);
+      }
+    }
+
+    if (req.query.status !== undefined && req.query.status !== '') {
+      if (!['Pending', 'Completed'].includes(req.query.status)) {
+        const error = new Error('status must be one of: Pending, Completed');
+        error.statusCode = 400;
+        throw error;
+      }
+      filters.push('su.status = ?');
+      parameters.push(req.query.status);
+    }
+
+    const [rows] = await pool.execute(
+      `
+        SELECT
+          su.public_id,
+          b.public_id AS booking_public_id,
+          r.public_id AS room_public_id,
+          r.room_number,
+          g.public_id AS guest_public_id,
+          CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
+          sc.public_id AS service_public_id,
+          sc.service_name,
+          su.usage_time,
+          su.quantity,
+          su.price_at_usage,
+          su.status
+        FROM service_usage su
+        JOIN service_catalogue sc ON sc.service_id = su.service_id
+        JOIN room r ON r.room_id = su.room_id
+        JOIN booking b ON b.booking_id = su.booking_id
+        JOIN guest g ON g.guest_id = b.guest_id
+        ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
+        ORDER BY su.usage_time DESC, su.usage_id DESC
+      `,
+      parameters,
+    );
+
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/service-requests/:publicId/complete', async (req, res, next) => {
+  try {
+    const role = req.auth?.user?.role;
+    if (!['admin', 'manager', 'front_desk'].includes(role)) {
+      res.status(role ? 403 : 401).json({
+        error: 'You are not authorized to complete service requests',
+      });
+      return;
+    }
+
+    const publicId = req.params.publicId;
+    if (typeof publicId !== 'string' || publicId.length !== 36) {
+      res.status(400).json({ error: 'Service request public_id must be a UUID' });
+      return;
+    }
+
+    const [result] = await pool.execute(
+      `UPDATE service_usage
+       SET status = 'Completed'
+       WHERE public_id = ? AND status <> 'Completed'`,
+      [publicId],
+    );
+    const [rows] = await pool.execute(
+      'SELECT public_id, status FROM service_usage WHERE public_id = ?',
+      [publicId],
+    );
+
+    if (!rows.length) {
+      res.status(404).json({ error: 'Service request not found' });
+      return;
+    }
+
+    res.json({
+      message:
+        result.affectedRows > 0
+          ? 'Service request marked as completed'
+          : 'Service request was already completed',
+      data: rows[0],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+//TESTING TRIGGERS AND PROCEDURES
 
 router.post('/calculate-bill', async (req, res, next) => {
   const bookingPublicId = req.body?.booking_public_id;

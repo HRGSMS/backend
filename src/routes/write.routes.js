@@ -72,7 +72,7 @@ async function getServiceId(connection, publicId) {
 
 async function getBooking(connection, publicId) {
   const [rows] = await connection.execute(
-    'SELECT booking_id, public_id FROM booking WHERE public_id = ?',
+    'SELECT booking_id, public_id, booking_status FROM booking WHERE public_id = ?',
     [publicId],
   );
   if (!rows.length) {
@@ -405,19 +405,48 @@ router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) =
     const quantity = requiredPositiveNumber(req.body?.quantity, 'quantity');
     connection = await pool.getConnection();
     await connection.beginTransaction();
+
     const booking = await getBooking(connection, publicId);
+    if (booking.booking_status !== 'Checked-In') {
+      throw validationError('Service requests can only be created for checked-in bookings');
+    }
+
     const serviceId = await getServiceId(connection, servicePublicId);
-    const [rooms] = await connection.execute('SELECT room_id FROM room WHERE public_id = ?', [roomPublicId]);
-    if (!rooms.length) throw validationError('room_public_id does not identify an existing room');
+    const [rooms] = await connection.execute(
+      `SELECT r.room_id
+       FROM room r
+       JOIN booking_room br ON br.room_id = r.room_id
+       WHERE r.public_id = ? AND br.booking_id = ?`,
+      [roomPublicId, booking.booking_id],
+    );
+    if (!rooms.length) {
+      throw validationError('room_public_id does not identify a room assigned to this booking');
+    }
+
     const usageId = await nextId(connection, 'service_usage', 'usage_id');
     await connection.execute(
-      `INSERT INTO service_usage (usage_id, booking_id, service_id, room_id, usage_time, quantity)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+      `INSERT INTO service_usage
+        (usage_id, booking_id, service_id, room_id, usage_time, quantity, status)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')`,
       [usageId, booking.booking_id, serviceId, rooms[0].room_id, quantity],
     );
+
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
-    res.status(201).json({ data: { public_id: publicId, service_public_id: servicePublicId, room_public_id: roomPublicId, quantity } });
+
+    res.status(201).json({
+      data: {
+        public_id: (await connection.execute(
+          'SELECT public_id FROM service_usage WHERE usage_id = ?',
+          [usageId],
+        ))[0][0].public_id,
+        booking_public_id: publicId,
+        service_public_id: servicePublicId,
+        room_public_id: roomPublicId,
+        quantity,
+        status: 'Pending',
+      },
+    });
   } catch (error) {
     if (connection) await connection.rollback();
     if (error.statusCode) {
@@ -429,5 +458,4 @@ router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) =
     connection?.release();
   }
 });
-
 export default router;
