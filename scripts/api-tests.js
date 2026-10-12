@@ -97,14 +97,18 @@ function printResult(ok, method, path, status, detail = '') {
   );
 }
 
-function assertNoDatabaseIds(value, path = 'response') {
+function assertNoDatabaseIds(value, path = 'response', allowedIds = []) {
   if (!value || typeof value !== 'object') return;
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === 'id' || key === 'ids' || key.endsWith('_id')) {
+    if (
+      (key === 'id' || key === 'ids' || key.endsWith('_id')) &&
+      !allowedIds.includes(key)
+    ) {
       throw new Error(`database identifier "${path}.${key}" was exposed`);
     }
-    assertNoDatabaseIds(nestedValue, `${path}.${key}`);
+
+    assertNoDatabaseIds(nestedValue, `${path}.${key}`, allowedIds);
   }
 }
 
@@ -171,7 +175,7 @@ async function test(label, method, path, options = {}) {
       throw new Error('expected a { data: [] } response');
     }
     if (options.hideIds) {
-      assertNoDatabaseIds(result.data);
+      assertNoDatabaseIds(result.data, 'response', options.allowedIds || []);
     }
 
     passed += 1;
@@ -233,6 +237,53 @@ async function runTests() {
   await test('admin session', 'GET', '/api/auth/get-session', { cookie: adminCookie });
   await test('manager session', 'GET', '/api/auth/get-session', { cookie: managerCookie });
   await test('front-desk session', 'GET', '/api/auth/get-session', { cookie: frontDeskCookie });
+
+  printHeader('Service catalogue price-update authorization');
+
+  await test(
+    'price update requires authentication',
+    'PATCH',
+    '/api/services/1/price',
+    {
+      body: { price: 1234.56 },
+      status: 401,
+    },
+  );
+
+  await test(
+    'front desk cannot update service price',
+    'PATCH',
+    '/api/services/1/price',
+    {
+      cookie: frontDeskCookie,
+      body: { price: 1234.56 },
+      status: 403,
+    },
+  );
+
+  await test(
+    'manager cannot update service price',
+    'PATCH',
+    '/api/services/1/price',
+    {
+      cookie: managerCookie,
+      body: { price: 1234.56 },
+      status: 403,
+    },
+  );
+
+  for (const invalidPrice of [-1, '', null, true, 'not-a-price', 12.345]) {
+    await test(
+      `invalid service price rejected (${String(invalidPrice)})`,
+      'PATCH',
+      '/api/services/1/price',
+      {
+        cookie: adminCookie,
+        body: { price: invalidPrice },
+        status: 400,
+      },
+    );
+  }
 
   printHeader('Admin-only authentication endpoints');
   await test('admin lists users', 'GET', '/api/auth/admin/list-users?limit=100', {
@@ -296,6 +347,7 @@ async function runTests() {
       cookie: frontDeskCookie,
       collection: true,
       hideIds: true,
+      allowedIds: path === '/api/services' ? ['service_id'] : [],
     });
   }
 

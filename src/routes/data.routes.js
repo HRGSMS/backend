@@ -81,10 +81,164 @@ router.get('/services', (req, res, next) =>
     res,
     next,
     'service_catalogue',
-    'service_name, service_description, current_price, price_update_time',
+    'service_id, service_name, service_description, current_price, price_update_time',
     'service_id',
   ),
 );
+
+// Update a service's current price.
+// Only authenticated administrators may change catalogue prices.
+router.patch('/services/:id/price', async (req, res, next) => {
+  try {
+    // Verify the caller's role.
+    if (req.auth?.user?.role !== 'admin') {
+      res.status(403).json({
+        error: 'Only administrators can update service prices',
+      });
+      return;
+    }
+
+    // Validate the service ID.
+    const serviceId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(serviceId) || serviceId <= 0) {
+      res.status(400).json({
+        error: 'Service ID must be a positive integer',
+      });
+      return;
+    }
+
+    // Require a valid, non-negative price.
+    const { price } = req.body ?? {};
+
+    if (
+      price === undefined ||
+      price === null ||
+      price === '' ||
+      typeof price === 'boolean' ||
+      !Number.isFinite(Number(price)) ||
+      Number(price) < 0
+    ) {
+      res.status(400).json({
+        error: 'Price must be a valid non-negative number',
+      });
+      return;
+    }
+
+    const numericPrice = Number(price);
+
+    // Accept at most two decimal places.
+    if (Math.round(numericPrice * 100) !== numericPrice * 100) {
+      res.status(400).json({
+        error: 'Price must have at most two decimal places',
+      });
+      return;
+    }
+
+    // Update the catalogue without modifying historical usage records.
+    const [result] = await pool.execute(
+      `UPDATE service_catalogue
+       SET current_price = ?, price_update_time = CURRENT_TIMESTAMP
+       WHERE service_id = ?`,
+      [numericPrice, serviceId],
+    );
+
+    if (result.affectedRows === 0) {
+      const [rows] = await pool.execute(
+        'SELECT service_id FROM service_catalogue WHERE service_id = ?',
+        [serviceId],
+      );
+
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'Service not found' });
+        return;
+      }
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT service_id, service_name, service_description,
+              current_price, price_update_time
+       FROM service_catalogue
+       WHERE service_id = ?`,
+      [serviceId],
+    );
+
+    res.json({
+      message: 'Service price updated successfully',
+      data: rows[0],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/service-catalogue', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        service_id,
+        service_name,
+        service_description,
+        current_price
+      FROM service_catalogue
+      ORDER BY service_id
+    `);
+
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/service-request-options', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        b.booking_id,
+        CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
+        br.room_id,
+        r.room_number,
+        b.booking_status
+      FROM booking b
+      JOIN guest g
+        ON g.guest_id = b.guest_id
+      JOIN booking_room br
+        ON br.booking_id = b.booking_id
+      JOIN room r
+        ON r.room_id = br.room_id
+      WHERE b.booking_status = 'Checked-In'
+      ORDER BY g.first_name, g.last_name, r.room_number
+    `);
+
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/service-requests', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        su.usage_id,
+        su.booking_id,
+        su.room_id,
+        su.service_id,
+        sc.service_name,
+        su.usage_time,
+        su.quantity,
+        su.price_at_usage
+      FROM service_usage su
+      JOIN service_catalogue sc
+        ON sc.service_id = su.service_id
+      ORDER BY su.usage_id DESC
+    `);
+
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/guests', (req, res, next) =>
   listTable(
@@ -380,6 +534,156 @@ router.get('/reports/revenue', async (req, res, next) => {
     res.json({ data: rows, from, to });
   } catch (error) {
     next(error);
+  }
+});
+
+router.post('/service-requests', async (req, res, next) => {
+  const { bookingId, roomId, serviceId, quantity } = req.body;
+
+  // Validate the request body.
+  const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+
+  if (
+    !isPositiveInteger(bookingId) ||
+    !isPositiveInteger(roomId) ||
+    !isPositiveInteger(serviceId) ||
+    !isPositiveInteger(quantity)
+  ) {
+    res.status(400).json({
+      error: 'bookingId, roomId, serviceId, and quantity must be positive integers',
+    });
+    return;
+  }
+
+  let connection;
+  let lockAcquired = false;
+
+  try {
+    connection = await pool.getConnection();
+
+    // Serialize service-request ID allocation across cooperating writers.
+    const lockName = `${process.env.DB_NAME || 'hrgsms'}_service_usage_id`;
+
+    const [lockRows] = await connection.execute('SELECT GET_LOCK(?, 10) AS acquired', [lockName]);
+
+    if (lockRows[0]?.acquired !== 1) {
+      const error = new Error('Could not acquire service-request ID lock');
+      error.statusCode = 503;
+      throw error;
+    }
+
+    lockAcquired = true;
+
+    await connection.beginTransaction();
+
+    // Verify that this room belongs to the specified booking.
+    // Verify that the booking is checked in and includes this room.
+    const [bookingRooms] = await connection.execute(
+      `
+        SELECT b.booking_id
+        FROM booking b
+        JOIN booking_room br
+          ON br.booking_id = b.booking_id
+        WHERE b.booking_id = ?
+          AND br.room_id = ?
+          AND b.booking_status = 'Checked-In'
+      `,
+      [bookingId, roomId],
+    );
+
+    if (bookingRooms.length === 0) {
+      const error = new Error(
+        'The booking must be checked in and the room must belong to that booking',
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Read the current service price.
+    const [services] = await connection.execute(
+      `
+        SELECT service_name, current_price
+        FROM service_catalogue
+        WHERE service_id = ?
+      `,
+      [serviceId],
+    );
+
+    if (services.length === 0) {
+      const error = new Error('Service not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // Allocate an ID while holding the named lock.
+    const [idRows] = await connection.execute(
+      'SELECT COALESCE(MAX(usage_id), 0) + 1 AS next_id FROM service_usage',
+    );
+
+    const usageId = Number(idRows[0].next_id);
+
+    if (!Number.isSafeInteger(usageId) || usageId <= 0) {
+      const error = new Error('Could not allocate a valid service-request ID');
+      error.statusCode = 500;
+      throw error;
+    }
+
+    const priceAtUsage = services[0].current_price;
+
+    await connection.execute(
+      `
+        INSERT INTO service_usage (
+          usage_id,
+          booking_id,
+          room_id,
+          service_id,
+          usage_time,
+          quantity,
+          price_at_usage
+        )
+        VALUES (?, ?, ?, ?, NOW(), ?, ?)
+      `,
+      [usageId, bookingId, roomId, serviceId, quantity, priceAtUsage],
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      data: {
+        usage_id: usageId,
+        booking_id: bookingId,
+        room_id: roomId,
+        service_id: serviceId,
+        service_name: services[0].service_name,
+        usage_time: new Date(),
+        quantity,
+        price_at_usage: priceAtUsage,
+      },
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // Preserve the original error.
+      }
+    }
+
+    next(error);
+  } finally {
+    if (connection) {
+      if (lockAcquired) {
+        try {
+          await connection.execute('SELECT RELEASE_LOCK(?)', [
+            `${process.env.DB_NAME || 'hrgsms'}_service_usage_id`,
+          ]);
+        } catch (error) {
+          console.error('Failed to release service-request ID lock:', error);
+        }
+      }
+
+      connection.release();
+    }
   }
 });
 
