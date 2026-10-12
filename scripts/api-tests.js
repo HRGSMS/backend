@@ -389,6 +389,35 @@ async function runTests() {
     status: 204,
   });
 
+  printHeader('Guest service request APIs');
+  const serviceOptions = await test('service request options', 'GET', '/api/service-request-options', {
+    cookie: frontDeskCookie,
+    collection: true,
+    hideIds: true,
+  });
+  const serviceOption = serviceOptions?.data?.data?.[0];
+  if (serviceOption) {
+    const createdRequest = await test('front-desk creates service request', 'POST', `/api/bookings/${serviceOption.booking_public_id}/services`, {
+      cookie: frontDeskCookie,
+      status: 201,
+      body: {
+        service_public_id: servicePublicId,
+        room_public_id: serviceOption.room_public_id,
+        quantity: 1,
+      },
+    });
+    const requestPublicId = createdRequest?.data?.data?.public_id;
+    await test('staff lists service requests', 'GET', '/api/service-requests?status=Pending', {
+      cookie: managerCookie,
+      collection: true,
+      hideIds: true,
+    });
+    await test('manager completes service request', 'PATCH', `/api/service-requests/${requestPublicId}/complete`, {
+      cookie: managerCookie,
+      hideIds: true,
+    });
+  }
+
   printHeader('Report endpoints');
   const reportEndpoints = [
     ['/api/reports/occupancy?from=2026-10-01&to=2026-10-31', 'occupancy report'],

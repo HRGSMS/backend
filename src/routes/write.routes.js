@@ -417,7 +417,18 @@ router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) =
     );
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
-    res.status(201).json({ data: { public_id: publicId, service_public_id: servicePublicId, room_public_id: roomPublicId, quantity } });
+    res.status(201).json({
+      data: {
+        public_id: (await connection.execute(
+          'SELECT public_id FROM service_usage WHERE usage_id = ?',
+          [usageId],
+        ))[0][0].public_id,
+        booking_public_id: publicId,
+        service_public_id: servicePublicId,
+        room_public_id: roomPublicId,
+        quantity,
+      },
+    });
   } catch (error) {
     if (connection) await connection.rollback();
     if (error.statusCode) {
