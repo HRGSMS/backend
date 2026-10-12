@@ -55,32 +55,43 @@ async function nextId(connection, table, column) {
   return rows[0].next_id;
 }
 
-async function getGuestId(connection, email) {
-  const [rows] = await connection.execute('SELECT guest_id FROM guest WHERE email = ?', [email]);
-  if (!rows.length) throw validationError('guest_email does not identify an existing guest');
+async function getGuestId(connection, publicId) {
+  const [rows] = await connection.execute('SELECT guest_id FROM guest WHERE public_id = ?', [publicId]);
+  if (!rows.length) throw validationError('guest_public_id does not identify an existing guest');
   return rows[0].guest_id;
 }
 
-async function getServiceId(connection, serviceName) {
+async function getServiceId(connection, publicId) {
   const [rows] = await connection.execute(
-    'SELECT service_id FROM service_catalogue WHERE service_name = ?',
-    [serviceName],
+    'SELECT service_id FROM service_catalogue WHERE public_id = ?',
+    [publicId],
   );
-  if (!rows.length) throw validationError('service_name does not identify an existing service');
+  if (!rows.length) throw validationError('service_public_id does not identify an existing service');
   return rows[0].service_id;
 }
 
-async function getBooking(connection, bookingReference) {
+async function getBooking(connection, publicId) {
   const [rows] = await connection.execute(
-    'SELECT booking_id, booking_reference FROM booking WHERE booking_reference = ?',
-    [bookingReference],
+    'SELECT booking_id, public_id FROM booking WHERE public_id = ?',
+    [publicId],
   );
   if (!rows.length) {
-    const error = new Error('booking_reference does not identify an existing booking');
+    const error = new Error('booking_public_id does not identify an existing booking');
     error.statusCode = 404;
     throw error;
   }
+
   return rows[0];
+}
+
+async function getTaxId(connection, publicId) {
+  if (publicId === undefined || publicId === null) return null;
+  const [rows] = await connection.execute(
+    'SELECT tax_id FROM tax_rate WHERE public_id = ?',
+    [publicId],
+  );
+  if (!rows.length) throw validationError('tax_public_id does not identify an existing tax rate');
+  return rows[0].tax_id;
 }
 
 router.post('/guests', staffRoles, async (req, res, next) => {
@@ -93,13 +104,14 @@ router.post('/guests', staffRoles, async (req, res, next) => {
     try {
       await connection.beginTransaction();
       const guestId = await nextId(connection, 'guest', 'guest_id');
+      const publicId = randomUUID();
       await connection.execute(
-        `INSERT INTO guest (guest_id, first_name, last_name, email, phone_number)
-         VALUES (?, ?, ?, ?, ?)`,
-        [guestId, firstName, lastName, email, phoneNumber],
+        `INSERT INTO guest (guest_id, public_id, first_name, last_name, email, phone_number)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [guestId, publicId, firstName, lastName, email, phoneNumber],
       );
       await connection.commit();
-      res.status(201).json({ data: { first_name: firstName, last_name: lastName, email, phone_number: phoneNumber } });
+      res.status(201).json({ data: { public_id: publicId, first_name: firstName, last_name: lastName, email, phone_number: phoneNumber } });
     } catch (error) {
       await connection.rollback();
       handleDatabaseError(error, res, next);
@@ -111,9 +123,9 @@ router.post('/guests', staffRoles, async (req, res, next) => {
   }
 });
 
-router.patch('/guests/:email', staffRoles, async (req, res, next) => {
+router.patch('/guests/:publicId', staffRoles, async (req, res, next) => {
   try {
-    const currentEmail = requiredString(req.params.email, 'email', 30);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
     const fields = {
       first_name: req.body?.first_name,
       last_name: req.body?.last_name,
@@ -126,14 +138,14 @@ router.patch('/guests/:email', staffRoles, async (req, res, next) => {
 
     const [result] = await pool.execute(
       `UPDATE guest SET ${updates.map(([name]) => `\`${name}\` = ?`).join(', ')}
-       WHERE email = ?`,
-      [...updates.map(([, value]) => value.trim()), currentEmail],
+       WHERE public_id = ?`,
+      [...updates.map(([, value]) => value.trim()), publicId],
     );
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Guest not found' });
       return;
     }
-    res.json({ data: { email: fields.email || currentEmail, updated: true } });
+    res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
       res.status(409).json({ error: 'A guest with that email already exists' });
@@ -143,10 +155,10 @@ router.patch('/guests/:email', staffRoles, async (req, res, next) => {
   }
 });
 
-router.delete('/guests/:email', staffRoles, async (req, res, next) => {
+router.delete('/guests/:publicId', staffRoles, async (req, res, next) => {
   try {
-    const email = requiredString(req.params.email, 'email', 30);
-    const [result] = await pool.execute('DELETE FROM guest WHERE email = ?', [email]);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
+    const [result] = await pool.execute('DELETE FROM guest WHERE public_id = ?', [publicId]);
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Guest not found' });
       return;
@@ -170,14 +182,16 @@ router.post('/services', catalogueRoles, async (req, res, next) => {
     try {
       await connection.beginTransaction();
       const serviceId = await nextId(connection, 'service_catalogue', 'service_id');
+      const publicId = randomUUID();
+      const taxId = await getTaxId(connection, req.body?.tax_public_id);
       await connection.execute(
         `INSERT INTO service_catalogue
-          (service_id, service_name, service_description, current_price, price_update_time, tax_id)
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
-        [serviceId, serviceName, description, price, req.body?.tax_id ?? null],
+          (service_id, public_id, service_name, service_description, current_price, price_update_time, tax_id)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+        [serviceId, publicId, serviceName, description, price, taxId],
       );
       await connection.commit();
-      res.status(201).json({ data: { service_name: serviceName, service_description: description, current_price: price } });
+      res.status(201).json({ data: { public_id: publicId, service_name: serviceName, service_description: description, current_price: price } });
     } catch (error) {
       await connection.rollback();
       handleDatabaseError(error, res, next);
@@ -189,9 +203,9 @@ router.post('/services', catalogueRoles, async (req, res, next) => {
   }
 });
 
-router.patch('/services/:serviceName', catalogueRoles, async (req, res, next) => {
+router.patch('/services/:publicId', catalogueRoles, async (req, res, next) => {
   try {
-    const serviceName = requiredString(req.params.serviceName, 'service_name', 20);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
     const updates = [];
     const values = [];
     if (req.body?.service_description !== undefined) {
@@ -205,23 +219,23 @@ router.patch('/services/:serviceName', catalogueRoles, async (req, res, next) =>
     if (!updates.length) throw validationError('service_description or current_price is required');
     updates.push('price_update_time = CURRENT_TIMESTAMP');
     const [result] = await pool.execute(
-      `UPDATE service_catalogue SET ${updates.join(', ')} WHERE service_name = ?`,
-      [...values, serviceName],
+      `UPDATE service_catalogue SET ${updates.join(', ')} WHERE public_id = ?`,
+      [...values, publicId],
     );
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Service not found' });
       return;
     }
-    res.json({ data: { service_name: serviceName, updated: true } });
+    res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
     next(error);
   }
 });
 
-router.delete('/services/:serviceName', catalogueRoles, async (req, res, next) => {
+router.delete('/services/:publicId', catalogueRoles, async (req, res, next) => {
   try {
-    const serviceName = requiredString(req.params.serviceName, 'service_name', 20);
-    const [result] = await pool.execute('DELETE FROM service_catalogue WHERE service_name = ?', [serviceName]);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
+    const [result] = await pool.execute('DELETE FROM service_catalogue WHERE public_id = ?', [publicId]);
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Service not found' });
       return;
@@ -239,31 +253,33 @@ router.delete('/services/:serviceName', catalogueRoles, async (req, res, next) =
 router.post('/bookings', staffRoles, async (req, res, next) => {
   let connection;
   try {
-    const guestEmail = requiredString(req.body?.guest_email, 'guest_email', 30);
+    const guestPublicId = requiredString(req.body?.guest_public_id, 'guest_public_id', 36);
     const checkIn = requiredDate(req.body?.check_in_time, 'check_in_time');
     const checkOut = requiredDate(req.body?.check_out_time, 'check_out_time');
     if (new Date(checkOut) <= new Date(checkIn)) throw validationError('check_out_time must be after check_in_time');
-    if (!Array.isArray(req.body?.room_numbers) || !req.body.room_numbers.length) {
-      throw validationError('room_numbers must contain at least one room number');
+    if (!Array.isArray(req.body?.room_public_ids) || !req.body.room_public_ids.length) {
+      throw validationError('room_public_ids must contain at least one UUID');
     }
     const status = req.body.booking_status || 'Booked';
     if (!['Booked', 'Checked-In'].includes(status)) throw validationError('New bookings may only be Booked or Checked-In');
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const guestId = await getGuestId(connection, guestEmail);
+    const guestId = await getGuestId(connection, guestPublicId);
+    const taxId = await getTaxId(connection, req.body?.tax_public_id);
     const bookingId = await nextId(connection, 'booking', 'booking_id');
+    const publicId = randomUUID();
     const bookingReference = randomUUID();
     await connection.execute(
       `INSERT INTO booking
-        (booking_id, booking_reference, guest_id, booking_time, check_in_time, check_out_time,
+        (booking_id, public_id, booking_reference, guest_id, booking_time, check_in_time, check_out_time,
          booking_status, payment_status, tax_id)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'Unpaid', ?)`,
-      [bookingId, bookingReference, guestId, checkIn, checkOut, status, req.body.tax_id ?? null],
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'Unpaid', ?)`,
+      [bookingId, publicId, bookingReference, guestId, checkIn, checkOut, status, taxId],
     );
-    for (const roomNumber of req.body.room_numbers) {
-      const [rooms] = await connection.execute('SELECT room_id FROM room WHERE room_number = ? FOR UPDATE', [roomNumber]);
-      if (!rooms.length) throw validationError(`Room ${roomNumber} does not exist`);
+    for (const roomPublicId of req.body.room_public_ids) {
+      const [rooms] = await connection.execute('SELECT room_id FROM room WHERE public_id = ? FOR UPDATE', [roomPublicId]);
+      if (!rooms.length) throw validationError(`Room ${roomPublicId} does not exist`);
       const [conflicts] = await connection.execute(
         `SELECT 1 FROM booking_room br JOIN booking b ON b.booking_id = br.booking_id
          WHERE br.room_id = ? AND b.booking_status IN ('Booked', 'Checked-In')
@@ -271,7 +287,7 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
         [rooms[0].room_id, checkOut, checkIn],
       );
       if (conflicts.length) {
-        const error = new Error(`Room ${roomNumber} is already booked for the requested period`);
+        const error = new Error(`Room ${roomPublicId} is already booked for the requested period`);
         error.statusCode = 409;
         throw error;
       }
@@ -281,7 +297,7 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
       );
     }
     await connection.commit();
-    res.status(201).json({ data: { booking_reference: bookingReference, booking_status: status } });
+    res.status(201).json({ data: { public_id: publicId, booking_reference: bookingReference, booking_status: status } });
   } catch (error) {
     if (connection) await connection.rollback();
     if (error.statusCode || error.code === 'ER_DUP_ENTRY' || error.code === 'ER_NO_REFERENCED_ROW_2') {
@@ -296,9 +312,9 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
   }
 });
 
-router.patch('/bookings/:bookingReference', staffRoles, async (req, res, next) => {
+router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
   try {
-    const reference = requiredString(req.params.bookingReference, 'booking_reference', 36);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
     const updates = [];
     const values = [];
     if (req.body?.booking_status !== undefined) {
@@ -319,26 +335,26 @@ router.patch('/bookings/:bookingReference', staffRoles, async (req, res, next) =
     }
     if (!updates.length) throw validationError('At least one booking field is required');
     const [result] = await pool.execute(
-      `UPDATE booking SET ${updates.join(', ')} WHERE booking_reference = ?`,
-      [...values, reference],
+      `UPDATE booking SET ${updates.join(', ')} WHERE public_id = ?`,
+      [...values, publicId],
     );
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Booking not found' });
       return;
     }
-    res.json({ data: { booking_reference: reference, updated: true } });
+    res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
     next(error);
   }
 });
 
-router.delete('/bookings/:bookingReference', catalogueRoles, async (req, res, next) => {
+router.delete('/bookings/:publicId', catalogueRoles, async (req, res, next) => {
   try {
-    const reference = requiredString(req.params.bookingReference, 'booking_reference', 36);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
     const [result] = await pool.execute(
       `UPDATE booking SET booking_status = 'Cancelled', cancellation_time = CURRENT_TIMESTAMP
-       WHERE booking_reference = ? AND booking_status = 'Booked'`,
-      [reference],
+       WHERE public_id = ? AND booking_status = 'Booked'`,
+      [publicId],
     );
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Booked booking not found; only Booked bookings can be cancelled' });
@@ -350,15 +366,15 @@ router.delete('/bookings/:bookingReference', catalogueRoles, async (req, res, ne
   }
 });
 
-router.post('/bookings/:bookingReference/payments', staffRoles, async (req, res, next) => {
+router.post('/bookings/:publicId/payments', staffRoles, async (req, res, next) => {
   let connection;
   try {
-    const reference = requiredString(req.params.bookingReference, 'booking_reference', 36);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
     const amount = requiredPositiveNumber(req.body?.amount, 'amount');
     const paymentMethod = requiredString(req.body?.payment_method, 'payment_method', 20);
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const booking = await getBooking(connection, reference);
+    const booking = await getBooking(connection, publicId);
     const paymentId = await nextId(connection, 'payment', 'payment_id');
     await connection.execute(
       `INSERT INTO payment (payment_id, booking_id, payment_date, payment_method, amount)
@@ -367,7 +383,7 @@ router.post('/bookings/:bookingReference/payments', staffRoles, async (req, res,
     );
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
-    res.status(201).json({ data: { booking_reference: reference, amount, payment_method: paymentMethod } });
+    res.status(201).json({ data: { public_id: publicId, amount, payment_method: paymentMethod } });
   } catch (error) {
     if (connection) await connection.rollback();
     if (error.statusCode) {
@@ -380,19 +396,19 @@ router.post('/bookings/:bookingReference/payments', staffRoles, async (req, res,
   }
 });
 
-router.post('/bookings/:bookingReference/services', staffRoles, async (req, res, next) => {
+router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) => {
   let connection;
   try {
-    const reference = requiredString(req.params.bookingReference, 'booking_reference', 36);
-    const serviceName = requiredString(req.body?.service_name, 'service_name', 20);
-    const roomNumber = requiredString(req.body?.room_number, 'room_number', 5);
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
+    const servicePublicId = requiredString(req.body?.service_public_id, 'service_public_id', 36);
+    const roomPublicId = requiredString(req.body?.room_public_id, 'room_public_id', 36);
     const quantity = requiredPositiveNumber(req.body?.quantity, 'quantity');
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const booking = await getBooking(connection, reference);
-    const serviceId = await getServiceId(connection, serviceName);
-    const [rooms] = await connection.execute('SELECT room_id FROM room WHERE room_number = ?', [roomNumber]);
-    if (!rooms.length) throw validationError('room_number does not identify an existing room');
+    const booking = await getBooking(connection, publicId);
+    const serviceId = await getServiceId(connection, servicePublicId);
+    const [rooms] = await connection.execute('SELECT room_id FROM room WHERE public_id = ?', [roomPublicId]);
+    if (!rooms.length) throw validationError('room_public_id does not identify an existing room');
     const usageId = await nextId(connection, 'service_usage', 'usage_id');
     await connection.execute(
       `INSERT INTO service_usage (usage_id, booking_id, service_id, room_id, usage_time, quantity)
@@ -401,7 +417,7 @@ router.post('/bookings/:bookingReference/services', staffRoles, async (req, res,
     );
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
-    res.status(201).json({ data: { booking_reference: reference, service_name: serviceName, room_number: roomNumber, quantity } });
+    res.status(201).json({ data: { public_id: publicId, service_public_id: servicePublicId, room_public_id: roomPublicId, quantity } });
   } catch (error) {
     if (connection) await connection.rollback();
     if (error.statusCode) {

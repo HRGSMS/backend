@@ -5,7 +5,9 @@ const router = Router();
 
 router.use((req, res, next) => {
   const identifierQuery = Object.keys(req.query).find(
-    (key) => key === 'id' || key === 'ids' || key.endsWith('_id'),
+    (key) =>
+      !key.endsWith('_public_id') &&
+      (key === 'id' || key === 'ids' || key.endsWith('_id')),
   );
 
   if (identifierQuery) {
@@ -57,7 +59,7 @@ async function listTable(req, res, next, table, columns, idColumn) {
 }
 
 router.get('/branches', (req, res, next) =>
-  listTable(req, res, next, 'branch', 'name, location_city', 'branch_id'),
+  listTable(req, res, next, 'branch', 'public_id, name, location_city', 'branch_id'),
 );
 
 router.get('/room-types', (req, res, next) =>
@@ -66,13 +68,13 @@ router.get('/room-types', (req, res, next) =>
     res,
     next,
     'room_type',
-    'type_name, room_type_description, capacity, daily_rate, rate_update_time',
+    'public_id, type_name, room_type_description, capacity, daily_rate, rate_update_time',
     'room_type_id',
   ),
 );
 
 router.get('/amenities', (req, res, next) =>
-  listTable(req, res, next, 'amenity', 'amenity_name, amenity_description', 'amenity_id'),
+  listTable(req, res, next, 'amenity', 'public_id, amenity_name, amenity_description', 'amenity_id'),
 );
 
 router.get('/services', (req, res, next) =>
@@ -81,7 +83,7 @@ router.get('/services', (req, res, next) =>
     res,
     next,
     'service_catalogue',
-    'service_name, service_description, current_price, price_update_time',
+    'public_id, service_name, service_description, current_price, price_update_time',
     'service_id',
   ),
 );
@@ -92,7 +94,7 @@ router.get('/guests', (req, res, next) =>
     res,
     next,
     'guest',
-    'first_name, last_name, email, phone_number',
+    'public_id, first_name, last_name, email, phone_number',
     'guest_id',
   ),
 );
@@ -133,6 +135,7 @@ router.get('/rooms', async (req, res, next) => {
           rt.type_name,
           rt.capacity,
           rt.daily_rate,
+          r.public_id,
           r.room_number,
           r.current_status,
           r.booking_availability
@@ -167,6 +170,7 @@ router.get('/bookings', async (req, res, next) => {
           CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
           g.email AS guest_email,
           b.booking_reference,
+          b.public_id,
           GROUP_CONCAT(DISTINCT br_branch.name ORDER BY br_branch.name) AS branch_names,
           b.booking_time,
           b.check_in_time,
@@ -199,9 +203,9 @@ router.get('/bookings', async (req, res, next) => {
 //TESTING TRIGGERS AND PROCEDURES 
 
 router.post('/calculate-bill', async (req, res, next) => {
-  const bookingId = req.body?.booking_id;
-  if (!Number.isInteger(bookingId) || bookingId <= 0 || bookingId > 1000000) {
-    res.status(400).json({ error: 'booking_id must be a positive integer' });
+  const bookingPublicId = req.body?.booking_public_id;
+  if (typeof bookingPublicId !== 'string' || !bookingPublicId.trim()) {
+    res.status(400).json({ error: 'booking_public_id must be a UUID' });
     return;
   }
 
@@ -210,9 +214,19 @@ router.post('/calculate-bill', async (req, res, next) => {
     connection = await pool.getConnection();
     // The procedure locks the booking until this transaction is committed.
     await connection.beginTransaction();
+    const [bookingRows] = await connection.execute(
+      'SELECT booking_id FROM booking WHERE public_id = ? FOR UPDATE',
+      [bookingPublicId],
+    );
+    if (!bookingRows.length) {
+      res.status(404).json({ error: 'Booking not found' });
+      await connection.rollback();
+      return;
+    }
+    const bookingId = bookingRows[0].booking_id;
     await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
     const [rows] = await connection.execute(
-      `SELECT booking_id, total_charge, total_tax_amount,
+      `SELECT public_id, total_charge, total_tax_amount,
         outstanding_amount, credit_amount, payment_status
        FROM booking WHERE booking_id = ?`,
       [bookingId],
@@ -240,9 +254,9 @@ router.post('/calculate-bill', async (req, res, next) => {
 
 //Booking cancellation - With trigger
 router.post('/cancel-booking', async (req, res, next) => {
-  const bookingId = req.body?.booking_id;
-  if (!Number.isInteger(bookingId) || bookingId <= 0 || bookingId > 1000000) {
-    res.status(400).json({ error: 'booking_id must be an integer between 1 and 1000000' });
+  const bookingPublicId = req.body?.booking_public_id;
+  if (typeof bookingPublicId !== 'string' || !bookingPublicId.trim()) {
+    res.status(400).json({ error: 'booking_public_id must be a UUID' });
     return;
   }
 
@@ -251,9 +265,19 @@ router.post('/cancel-booking', async (req, res, next) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     // The cancellation procedure also recalculates the bill.
+    const [bookingRows] = await connection.execute(
+      'SELECT booking_id FROM booking WHERE public_id = ? FOR UPDATE',
+      [bookingPublicId],
+    );
+    if (!bookingRows.length) {
+      res.status(404).json({ error: 'Booking not found' });
+      await connection.rollback();
+      return;
+    }
+    const bookingId = bookingRows[0].booking_id;
     await connection.execute('CALL sp_cancel_booking(?)', [bookingId]);
     const [rows] = await connection.execute(
-      `SELECT booking_id, booking_status, cancellation_time, cancellation_rule_id,
+      `SELECT public_id, booking_status, cancellation_time,
         cancellation_fee, cancellation_tax_amount, cancellation_charge_services,
         total_charge, total_tax_amount, outstanding_amount, credit_amount, payment_status
        FROM booking WHERE booking_id = ?`,
@@ -294,7 +318,8 @@ router.get('/reports/occupancy', async (req, res, next) => {
     const to = parseDate(req.query.to, 'to');
     const [rows] = await pool.execute(
       `
-        SELECT room_number, branch_name, type_name,
+        SELECT room_public_id, branch_public_id, booking_public_id,
+          room_number, branch_name, type_name,
           check_in_time, check_out_time, booking_status
         FROM report_occupancy
         WHERE booking_id IS NULL
@@ -316,7 +341,7 @@ router.get('/reports/occupancy', async (req, res, next) => {
 router.get('/reports/billing', async (req, res, next) => {
   try {
     const [rows] = await pool.execute(`
-      SELECT guest_name, booking_status, payment_status,
+      SELECT guest_public_id, booking_public_id, guest_name, booking_status, payment_status,
         total_charge, paid_amount, calculated_outstanding_amount
       FROM report_guest_billing
       ORDER BY calculated_outstanding_amount DESC
@@ -344,12 +369,13 @@ router.get('/reports/service-usage', async (req, res, next) => {
 
     const [rows] = await pool.execute(
       `
-        SELECT room_number, service_name,
+        SELECT room_public_id, service_public_id, booking_public_id,
+          room_number, service_name,
           SUM(quantity) AS total_quantity,
           SUM(line_total) AS total_amount
         FROM report_service_usage
         ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
-        GROUP BY room_number, service_name
+        GROUP BY room_public_id, service_public_id, booking_public_id, room_number, service_name
         ORDER BY total_quantity DESC, total_amount DESC
       `,
       parameters,
@@ -367,12 +393,12 @@ router.get('/reports/revenue', async (req, res, next) => {
     const to = parseDate(req.query.to, 'to');
     const [rows] = await pool.execute(
       `
-        SELECT branch_name,
+        SELECT branch_public_id, branch_name,
           SUM(room_and_tax_revenue) AS room_and_tax_revenue,
           SUM(service_revenue) AS service_revenue
         FROM report_revenue
         WHERE check_in_time < ? AND check_out_time > ?
-        GROUP BY branch_name
+        GROUP BY branch_public_id, branch_name
         ORDER BY branch_name
       `,
       [to, from],
@@ -387,7 +413,7 @@ router.get('/reports/revenue', async (req, res, next) => {
 router.get('/reports/top-services', async (req, res, next) => {
   try {
     const [rows] = await pool.execute(`
-      SELECT service_name, total_quantity, booking_count, total_revenue
+      SELECT service_public_id, service_name, total_quantity, booking_count, total_revenue
       FROM report_top_services
       ORDER BY total_quantity DESC, total_revenue DESC
     `);

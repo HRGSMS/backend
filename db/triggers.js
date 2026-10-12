@@ -1,15 +1,5 @@
 // All MySQL automation lives here. Run through db:init, never per HTTP request.
 // mysql2 sends each complete CREATE statement; DELIMITER is a mysql CLI command.
-async function addColumn(connection, table, column, definition) {
-  const [rows] = await connection.execute(
-    `SELECT 1 FROM information_schema.columns
-     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
-    [table, column],
-  );
-  if (!rows.length) {
-    await connection.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
-  }
-}
 
 const calculateBill = `
   CREATE PROCEDURE sp_calculate_bill(IN p_booking_id INT)
@@ -231,80 +221,8 @@ async function installTrigger(connection, name, table, event, body) {
   `);
 }
 
-async function prepareSchema(connection) {
-  // Additive migrations preserve existing data. Existing price_at_booking is a
-  // stay subtotal; do not silently reinterpret it as a nightly price.
-  for (const [table, column, definition] of [
-    ['booking', 'booking_reference', 'CHAR(36) NULL UNIQUE'],
-    ['booking', 'tax_rate_at_booking', 'DECIMAL(10,4) NULL'],
-    ['booking', 'credit_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0'],
-    ['booking', 'cancellation_fee', 'DECIMAL(10,2) NOT NULL DEFAULT 0'],
-    ['booking', 'cancellation_tax_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0'],
-    ['booking', 'cancellation_charge_services', 'BOOLEAN NOT NULL DEFAULT FALSE'],
-    ['booking', 'cancellation_rule_id', 'INT NULL'],
-    ['booking_room', 'nightly_rate_at_booking', 'DECIMAL(10,2) NULL'],
-    ['service_usage', 'tax_rate_at_usage', 'DECIMAL(10,4) NULL'],
-  ]) {
-    await addColumn(connection, table, column, definition);
-  }
-
-  for (const table of ['booking', 'payment', 'service_usage']) {
-    const key = table === 'service_usage' ? 'usage_id' : `${table}_id`;
-    const [rows] = await connection.execute(
-      `SELECT extra FROM information_schema.columns WHERE table_schema = DATABASE()
-       AND table_name = ? AND column_name = ?`,
-      [table, key],
-    );
-    if (rows.length > 0 && rows[0].extra && !rows[0].extra.includes('auto_increment')) {
-      await connection.query(`ALTER TABLE ${table} MODIFY ${key} INT NOT NULL AUTO_INCREMENT`);
-    }
-  }
-
-  await connection.query(`CREATE TABLE IF NOT EXISTS cancellation_policy (
-    rule_id INT PRIMARY KEY AUTO_INCREMENT,
-    minimum_notice_hours INT NOT NULL UNIQUE,
-    fee_type ENUM('percentage', 'first_night', 'fixed') NOT NULL,
-    fee_value DECIMAL(12,4) NOT NULL,
-    tax_rate DECIMAL(10,4) NOT NULL,
-    charge_services BOOLEAN NOT NULL,
-    CHECK (minimum_notice_hours >= 0), CHECK (fee_value >= 0),
-    CHECK (fee_type <> 'percentage' OR fee_value <= 1),
-    CHECK (tax_rate BETWEEN 0 AND 1), CHECK (charge_services IN (0, 1))
-  ) ENGINE=InnoDB`);
-  await connection.query(`CREATE TABLE IF NOT EXISTS notification_outbox (
-    event_id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    event_key VARCHAR(100) NOT NULL UNIQUE,
-    booking_id INT NOT NULL,
-    topic VARCHAR(50) NOT NULL,
-    channel ENUM('email', 'socket') NOT NULL,
-    available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    attempts INT NOT NULL DEFAULT 0,
-    delivered_at DATETIME NULL,
-    last_error VARCHAR(255) NULL,
-    FOREIGN KEY (booking_id) REFERENCES booking(booking_id),
-    INDEX pending_notifications (delivered_at, available_at)
-  ) ENGINE=InnoDB`);
-}
-
-async function backfillExistingData(connection) {
-  await connection.query(
-    `UPDATE booking SET booking_reference = UUID() WHERE booking_reference IS NULL`,
-  );
-  await connection.query(`UPDATE booking b LEFT JOIN tax_rate t ON t.tax_id = b.tax_id
-    SET b.tax_rate_at_booking = COALESCE(t.rate, 0) WHERE b.tax_rate_at_booking IS NULL`);
-  await connection.query(`UPDATE booking_room br JOIN booking b ON b.booking_id = br.booking_id
-    SET br.nightly_rate_at_booking = ROUND(br.price_at_booking / GREATEST(DATEDIFF(b.check_out_time, b.check_in_time), 1), 2)
-    WHERE br.nightly_rate_at_booking IS NULL`);
-  await connection.query(`UPDATE service_usage su JOIN service_catalogue s ON s.service_id = su.service_id
-    LEFT JOIN tax_rate t ON t.tax_id = s.tax_id
-    SET su.tax_rate_at_usage = COALESCE(t.rate, 0) WHERE su.tax_rate_at_usage IS NULL`);
-}
-
 // Install once during db:init. Procedures are called explicitly; triggers run automatically.
 export async function installTriggers(connection) {
-  await prepareSchema(connection);
-  await backfillExistingData(connection);
-
   for (const [name, sql] of [
     ['sp_calculate_bill', calculateBill],
     ['sp_cancel_booking', cancelBooking],

@@ -9,8 +9,9 @@ Install MySQL locally, create a database, and add a `.env` file in the project r
 ```env
 DB_HOST=localhost
 DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_mysql_password
+# Restricted application account; do not use root for the running backend.
+DB_USER=hrgsms_app
+DB_PASSWORD=your_runtime_password
 DB_NAME=hrgsms
 PORT=4000
 BETTER_AUTH_URL=http://localhost:4000
@@ -31,9 +32,88 @@ Initialize the database tables after creating the database configured in `.env`:
 npm run db:init
 ```
 
+`db:init` creates the complete schema and database views for a fresh database.
+It does not backfill UUIDs, insert seed data, or modify rows in an existing
+database. Use `npm run db:recreate` when the database must be rebuilt from
+scratch.
+
 The initializer is safe to run more than once because it uses
 `CREATE TABLE IF NOT EXISTS`. It creates the tables in foreign-key dependency
 order.
+
+### MySQL users and permissions
+
+Use separate MySQL accounts for database setup and application runtime. The
+backend should use a restricted runtime account. It needs only:
+
+- `SELECT` for API reads and report views
+- `INSERT`, `UPDATE`, and `DELETE` for application writes
+- `EXECUTE` for the billing and cancellation procedures
+
+It does not need `CREATE`, `ALTER`, `DROP`, `INDEX`, `REFERENCES`, `TRIGGER`,
+`CREATE ROUTINE`, `ALTER ROUTINE`, or `SUPER`.
+
+Create the runtime account as a MySQL administrator:
+
+```sql
+CREATE USER 'hrgsms_app'@'localhost'
+  IDENTIFIED BY 'strong-runtime-password';
+
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE
+  ON hrgsms.* TO 'hrgsms_app'@'localhost';
+
+FLUSH PRIVILEGES;
+```
+
+Use this account in `DB_USER` and `DB_PASSWORD` for the running backend.
+
+Run schema creation, database recreation, Better Auth migration, and seeding
+with a separate migration/administrator account. Do not grant those
+schema-changing permissions to `hrgsms_app`:
+
+```sql
+CREATE USER 'hrgsms_migrator'@'localhost'
+  IDENTIFIED BY 'strong-migration-password';
+
+GRANT ALL PRIVILEGES
+  ON hrgsms.* TO 'hrgsms_migrator'@'localhost';
+
+FLUSH PRIVILEGES;
+```
+
+For local development, temporarily use the migration account in `.env` when
+running `db:init`, `db:recreate`, `auth:migrate`, or the seed scripts, then
+restore `DB_USER=hrgsms_app` before starting the server. The migration account
+is not used by the running application.
+
+If binary logging is enabled, MySQL may still reject stored procedure and
+trigger definitions for the migration account with a `SUPER` privilege error.
+The safest option is to run those schema commands as a controlled DBA/root
+deployment step while keeping `log_bin_trust_function_creators` disabled.
+For a trusted local development database only, an administrator may instead
+enable trusted routine creators:
+
+```sql
+SET GLOBAL log_bin_trust_function_creators = 1;
+```
+
+`SET GLOBAL` applies immediately but is temporary. `SET PERSIST` survives
+restarts:
+
+```sql
+SET PERSIST log_bin_trust_function_creators = 1;
+```
+
+Verify it with:
+
+```sql
+SHOW GLOBAL VARIABLES LIKE 'log_bin_trust_function_creators';
+```
+
+This is convenient for local development but less safe than using a
+controlled migration account/DBA step. Do not enable it broadly in production
+or replicated environments without reviewing the MySQL binary-logging and
+replication policy.
 
 Apply Better Auth's authentication tables to the configured MySQL database:
 
@@ -108,19 +188,20 @@ Content-Type: application/json
 ```
 Body(Whule logged in): 
 {
-  "booking_id": 1
+  "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
 }
 ```
 ### Cancel booking
 
-Requires a logged-in session. Replace `1` with an existing booking ID.
+Requires a logged-in session. Replace the UUID with an existing
+`booking_public_id`.
 
 ```http
 POST http://localhost:4000/api/cancel-booking
 Content-Type: application/json
 
 {
-  "booking_id": 1
+  "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
 }
 ```
 
@@ -128,7 +209,7 @@ Cancels a `Booked` reservation using the configured cancellation policy and
 recalculates its bill. The response includes cancellation fees, taxes, and
 updated billing values under `data`.
 
-- `400`: Invalid booking ID (must be an integer between 1 and 1000000).
+- `400`: Invalid or missing booking UUID.
 - `401`: Authentication required.
 - `404`: Booking not found.
 - `409`: Booking cannot be cancelled or no matching cancellation policy exists.
@@ -258,8 +339,9 @@ The backend returns successful collection responses in the form
 ### Create, update, and delete records
 
 Write APIs require an authenticated session and never accept database primary
-key values from the frontend. Use `guest_email`, `service_name`,
-`room_number`, and the returned `booking_reference` instead.
+key values from the frontend. Every application row has a unique `public_id`
+UUID. Use `guest_public_id`, `service_public_id`, `room_public_id`, and
+`booking_public_id` instead of numeric database IDs.
 
 All hotel staff roles can manage guests, bookings, payments, and service usage.
 Only `admin` and `manager` can manage the service catalogue or cancel a
@@ -267,18 +349,18 @@ booking through `DELETE`.
 
 ```text
 POST   /api/guests
-PATCH  /api/guests/:email
-DELETE /api/guests/:email
+PATCH  /api/guests/:publicId
+DELETE /api/guests/:publicId
 
 POST   /api/services
-PATCH  /api/services/:serviceName
-DELETE /api/services/:serviceName
+PATCH  /api/services/:publicId
+DELETE /api/services/:publicId
 
 POST   /api/bookings
-PATCH  /api/bookings/:bookingReference
-DELETE /api/bookings/:bookingReference
-POST   /api/bookings/:bookingReference/payments
-POST   /api/bookings/:bookingReference/services
+PATCH  /api/bookings/:publicId
+DELETE /api/bookings/:publicId
+POST   /api/bookings/:publicId/payments
+POST   /api/bookings/:publicId/services
 ```
 
 Create a guest:
@@ -303,21 +385,21 @@ const response = await fetch('http://localhost:4000/api/bookings', {
   ...authRequestOptions,
   method: 'POST',
   body: JSON.stringify({
-    guest_email: 'amina@example.com',
-    room_numbers: ['204'],
+    guest_public_id: 'UUID_FROM_GUESTS_RESPONSE',
+    room_public_ids: ['UUID_FROM_ROOMS_RESPONSE'],
     check_in_time: '2026-11-10T14:00:00',
     check_out_time: '2026-11-13T11:00:00',
   }),
 });
 
 const { data } = await response.json();
-// data.booking_reference is used for later booking operations.
+// data.public_id is used for later booking operations.
 ```
 
 Add a payment or service usage to a booking:
 
 ```js
-await fetch(`http://localhost:4000/api/bookings/${data.booking_reference}/payments`, {
+await fetch(`http://localhost:4000/api/bookings/${data.public_id}/payments`, {
   ...authRequestOptions,
   method: 'POST',
   body: JSON.stringify({
@@ -326,12 +408,12 @@ await fetch(`http://localhost:4000/api/bookings/${data.booking_reference}/paymen
   }),
 });
 
-await fetch(`http://localhost:4000/api/bookings/${data.booking_reference}/services`, {
+await fetch(`http://localhost:4000/api/bookings/${data.public_id}/services`, {
   ...authRequestOptions,
   method: 'POST',
   body: JSON.stringify({
-    service_name: 'Room Service',
-    room_number: '204',
+    service_public_id: 'UUID_FROM_SERVICES_RESPONSE',
+    room_public_id: 'UUID_FROM_ROOMS_RESPONSE',
     quantity: 1,
   }),
 });
