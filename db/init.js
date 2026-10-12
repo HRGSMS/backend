@@ -316,16 +316,6 @@ export async function initializeDatabase(database = pool) {
       await connection.query(definition);
     }
 
-    const [columns] = await connection.query(
-      "SHOW COLUMNS FROM `service_usage` LIKE 'status'",
-    );
-
-    if (columns.length === 0) {
-      await connection.query(
-        "ALTER TABLE `service_usage` ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'Pending'",
-      );
-    }
-
     await installTriggers(connection);
 
     for (const definition of viewDefinitions) {
