@@ -130,6 +130,7 @@ const tableDefinitions = [
       \`usage_time\` DATETIME,
       \`quantity\` INT,
       \`price_at_usage\` DECIMAL(10, 2),
+      \`status\` VARCHAR(20) NOT NULL DEFAULT 'Pending',
       PRIMARY KEY (\`usage_id\`),
       FOREIGN KEY (\`room_id\`) REFERENCES \`room\`(\`room_id\`),
       FOREIGN KEY (\`booking_id\`) REFERENCES \`booking\`(\`booking_id\`),
@@ -246,6 +247,20 @@ export async function initializeDatabase() {
   try {
     for (const definition of tableDefinitions) {
       await connection.query(definition);
+    }
+
+    // Add status to existing installations without dropping or recreating data.
+    const [statusColumn] = await connection.execute(
+      `SELECT COLUMN_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'service_usage'
+         AND COLUMN_NAME = 'status'`,
+    );
+    if (statusColumn.length === 0) {
+      await connection.query(
+        "ALTER TABLE service_usage ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Pending'",
+      );
     }
 
     for (const definition of viewDefinitions) {

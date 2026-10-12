@@ -218,23 +218,116 @@ router.get('/service-request-options', async (req, res, next) => {
 
 router.get('/service-requests', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(`
-      SELECT
-        su.usage_id,
-        su.booking_id,
-        su.room_id,
-        su.service_id,
-        sc.service_name,
-        su.usage_time,
-        su.quantity,
-        su.price_at_usage
-      FROM service_usage su
-      JOIN service_catalogue sc
-        ON sc.service_id = su.service_id
-      ORDER BY su.usage_id DESC
-    `);
+    const filters = [];
+    const parameters = [];
+    const parseOptionalId = (value, name) => {
+      if (value === undefined || value === '') return null;
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        const error = new Error(`${name} must be a positive integer`);
+        error.statusCode = 400;
+        throw error;
+      }
+      return parsed;
+    };
+
+    const bookingId = parseOptionalId(req.query.bookingId, 'bookingId');
+    const roomId = parseOptionalId(req.query.roomId, 'roomId');
+    const serviceId = parseOptionalId(req.query.serviceId, 'serviceId');
+    const allowedStatuses = ['Pending', 'Completed'];
+    const status = req.query.status;
+
+    if (bookingId !== null) {
+      filters.push('su.booking_id = ?');
+      parameters.push(bookingId);
+    }
+    if (roomId !== null) {
+      filters.push('su.room_id = ?');
+      parameters.push(roomId);
+    }
+    if (serviceId !== null) {
+      filters.push('su.service_id = ?');
+      parameters.push(serviceId);
+    }
+    if (status !== undefined && status !== '') {
+      if (!allowedStatuses.includes(status)) {
+        const error = new Error(`status must be one of: ${allowedStatuses.join(', ')}`);
+        error.statusCode = 400;
+        throw error;
+      }
+      filters.push('su.status = ?');
+      parameters.push(status);
+    }
+
+    const [rows] = await pool.execute(
+      `
+        SELECT
+          su.usage_id,
+          su.booking_id,
+          su.room_id,
+          r.room_number,
+          CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
+          su.service_id,
+          sc.service_name,
+          su.usage_time,
+          su.quantity,
+          su.price_at_usage,
+          su.status
+        FROM service_usage su
+        JOIN service_catalogue sc ON sc.service_id = su.service_id
+        JOIN room r ON r.room_id = su.room_id
+        JOIN booking b ON b.booking_id = su.booking_id
+        JOIN guest g ON g.guest_id = b.guest_id
+        ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
+        ORDER BY su.usage_id DESC
+      `,
+      parameters,
+    );
 
     res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Mark a service request as completed. Repeated completion is idempotent.
+router.patch('/service-requests/:id/complete', async (req, res, next) => {
+  try {
+    const role = req.auth?.user?.role;
+    if (!['admin', 'manager', 'front_desk'].includes(role)) {
+      res.status(role ? 403 : 401).json({
+        error: 'You are not authorized to complete service requests',
+      });
+      return;
+    }
+
+    const usageId = Number(req.params.id);
+    if (!Number.isSafeInteger(usageId) || usageId <= 0) {
+      res.status(400).json({ error: 'Service request ID must be a positive integer' });
+      return;
+    }
+
+    const [result] = await pool.execute(
+      "UPDATE service_usage SET status = 'Completed' WHERE usage_id = ? AND status <> 'Completed'",
+      [usageId],
+    );
+
+    const [rows] = await pool.execute(
+      'SELECT usage_id, status FROM service_usage WHERE usage_id = ?',
+      [usageId],
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: 'Service request not found' });
+      return;
+    }
+
+    res.json({
+      message: result.affectedRows > 0
+        ? 'Service request marked as completed'
+        : 'Service request was already completed',
+      data: rows[0],
+    });
   } catch (error) {
     next(error);
   }

@@ -328,6 +328,26 @@ async function runTests() {
     });
   }
 
+  printHeader('Service request status API');
+  await test(
+    'completion requires authentication',
+    'PATCH',
+    '/api/service-requests/1/complete',
+    { status: 401 },
+  );
+  await test(
+    'invalid service request ID rejected',
+    'PATCH',
+    '/api/service-requests/not-a-number/complete',
+    { cookie: frontDeskCookie, status: 400 },
+  );
+  await test(
+    'invalid service request status filter rejected',
+    'GET',
+    '/api/service-requests?status=Unknown',
+    { cookie: frontDeskCookie, status: 400 },
+  );
+
   printHeader('Reference and operational data endpoints');
   const protectedEndpoints = [
     ['/api/branches', 'branches'],
