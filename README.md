@@ -37,6 +37,11 @@ It does not backfill UUIDs, insert seed data, or modify rows in an existing
 database. Use `npm run db:recreate` when the database must be rebuilt from
 scratch.
 
+The guest-service request status column is part of the initial schema. If an
+existing database was created before guest-service requests were added, run
+`npm run db:recreate` before using those endpoints; `db:init` intentionally
+does not alter existing tables.
+
 The initializer is safe to run more than once because it uses
 `CREATE TABLE IF NOT EXISTS`. It creates the tables in foreign-key dependency
 order.
@@ -361,6 +366,10 @@ PATCH  /api/bookings/:publicId
 DELETE /api/bookings/:publicId
 POST   /api/bookings/:publicId/payments
 POST   /api/bookings/:publicId/services
+
+GET    /api/service-request-options
+GET    /api/service-requests
+PATCH  /api/service-requests/:publicId/complete
 ```
 
 Create a guest:
@@ -423,6 +432,11 @@ Booking creation runs in a transaction and checks overlapping active bookings
 before assigning rooms. Payment and service writes recalculate the booking
 bill using the existing database procedure. Foreign-key and database trigger
 errors are returned as explicit `400`, `409`, or `404` responses.
+
+Service requests can only be created for checked-in bookings and rooms assigned
+to those bookings. New requests have `status: "Pending"`. Staff can list
+requests, filter by `booking_public_id`, `room_public_id`, `service_public_id`,
+or `status`, and mark a request complete using its service-request `public_id`.
 
 ### Reference data
 
@@ -557,6 +571,13 @@ In another terminal, run the full HTTP API test suite:
 
 ```bash
 npm run api:test
+```
+
+To run all backend test suites, including the database trigger/procedure
+tests and the HTTP API suite, use:
+
+```bash
+npm test
 ```
 
 The test runner uses the three seeded development accounts, keeps separate
