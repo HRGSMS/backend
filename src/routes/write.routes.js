@@ -56,7 +56,9 @@ async function nextId(connection, table, column) {
 }
 
 async function getGuestId(connection, publicId) {
-  const [rows] = await connection.execute('SELECT guest_id FROM guest WHERE public_id = ?', [publicId]);
+  const [rows] = await connection.execute('SELECT guest_id FROM guest WHERE public_id = ?', [
+    publicId,
+  ]);
   if (!rows.length) throw validationError('guest_public_id does not identify an existing guest');
   return rows[0].guest_id;
 }
@@ -66,7 +68,8 @@ async function getServiceId(connection, publicId) {
     'SELECT service_id FROM service_catalogue WHERE public_id = ?',
     [publicId],
   );
-  if (!rows.length) throw validationError('service_public_id does not identify an existing service');
+  if (!rows.length)
+    throw validationError('service_public_id does not identify an existing service');
   return rows[0].service_id;
 }
 
@@ -86,10 +89,9 @@ async function getBooking(connection, publicId) {
 
 async function getTaxId(connection, publicId) {
   if (publicId === undefined || publicId === null) return null;
-  const [rows] = await connection.execute(
-    'SELECT tax_id FROM tax_rate WHERE public_id = ?',
-    [publicId],
-  );
+  const [rows] = await connection.execute('SELECT tax_id FROM tax_rate WHERE public_id = ?', [
+    publicId,
+  ]);
   if (!rows.length) throw validationError('tax_public_id does not identify an existing tax rate');
   return rows[0].tax_id;
 }
@@ -111,7 +113,15 @@ router.post('/guests', staffRoles, async (req, res, next) => {
         [guestId, publicId, firstName, lastName, email, phoneNumber],
       );
       await connection.commit();
-      res.status(201).json({ data: { public_id: publicId, first_name: firstName, last_name: lastName, email, phone_number: phoneNumber } });
+      res.status(201).json({
+        data: {
+          public_id: publicId,
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone_number: phoneNumber,
+        },
+      });
     } catch (error) {
       await connection.rollback();
       handleDatabaseError(error, res, next);
@@ -134,7 +144,8 @@ router.patch('/guests/:publicId', staffRoles, async (req, res, next) => {
     };
     const updates = Object.entries(fields).filter(([, value]) => value !== undefined);
     if (!updates.length) throw validationError('At least one guest field is required');
-    for (const [name, value] of updates) requiredString(value, name, name === 'phone_number' ? 20 : name === 'email' ? 30 : 20);
+    for (const [name, value] of updates)
+      requiredString(value, name, name === 'phone_number' ? 20 : name === 'email' ? 30 : 20);
 
     const [result] = await pool.execute(
       `UPDATE guest SET ${updates.map(([name]) => `\`${name}\` = ?`).join(', ')}
@@ -191,7 +202,14 @@ router.post('/services', catalogueRoles, async (req, res, next) => {
         [serviceId, publicId, serviceName, description, price, taxId],
       );
       await connection.commit();
-      res.status(201).json({ data: { public_id: publicId, service_name: serviceName, service_description: description, current_price: price } });
+      res.status(201).json({
+        data: {
+          public_id: publicId,
+          service_name: serviceName,
+          service_description: description,
+          current_price: price,
+        },
+      });
     } catch (error) {
       await connection.rollback();
       handleDatabaseError(error, res, next);
@@ -235,7 +253,9 @@ router.patch('/services/:publicId', catalogueRoles, async (req, res, next) => {
 router.delete('/services/:publicId', catalogueRoles, async (req, res, next) => {
   try {
     const publicId = requiredString(req.params.publicId, 'public_id', 36);
-    const [result] = await pool.execute('DELETE FROM service_catalogue WHERE public_id = ?', [publicId]);
+    const [result] = await pool.execute('DELETE FROM service_catalogue WHERE public_id = ?', [
+      publicId,
+    ]);
     if (!result.affectedRows) {
       res.status(404).json({ error: 'Service not found' });
       return;
@@ -256,12 +276,14 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
     const guestPublicId = requiredString(req.body?.guest_public_id, 'guest_public_id', 36);
     const checkIn = requiredDate(req.body?.check_in_time, 'check_in_time');
     const checkOut = requiredDate(req.body?.check_out_time, 'check_out_time');
-    if (new Date(checkOut) <= new Date(checkIn)) throw validationError('check_out_time must be after check_in_time');
+    if (new Date(checkOut) <= new Date(checkIn))
+      throw validationError('check_out_time must be after check_in_time');
     if (!Array.isArray(req.body?.room_public_ids) || !req.body.room_public_ids.length) {
       throw validationError('room_public_ids must contain at least one UUID');
     }
     const status = req.body.booking_status || 'Booked';
-    if (!['Booked', 'Checked-In'].includes(status)) throw validationError('New bookings may only be Booked or Checked-In');
+    if (!['Booked', 'Checked-In'].includes(status))
+      throw validationError('New bookings may only be Booked or Checked-In');
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -278,7 +300,10 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
       [bookingId, publicId, bookingReference, guestId, checkIn, checkOut, status, taxId],
     );
     for (const roomPublicId of req.body.room_public_ids) {
-      const [rooms] = await connection.execute('SELECT room_id FROM room WHERE public_id = ? FOR UPDATE', [roomPublicId]);
+      const [rooms] = await connection.execute(
+        'SELECT room_id FROM room WHERE public_id = ? FOR UPDATE',
+        [roomPublicId],
+      );
       if (!rooms.length) throw validationError(`Room ${roomPublicId} does not exist`);
       const [conflicts] = await connection.execute(
         `SELECT 1 FROM booking_room br JOIN booking b ON b.booking_id = br.booking_id
@@ -297,12 +322,20 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
       );
     }
     await connection.commit();
-    res.status(201).json({ data: { public_id: publicId, booking_reference: bookingReference, booking_status: status } });
+    res.status(201).json({
+      data: { public_id: publicId, booking_reference: bookingReference, booking_status: status },
+    });
   } catch (error) {
     if (connection) await connection.rollback();
-    if (error.statusCode || error.code === 'ER_DUP_ENTRY' || error.code === 'ER_NO_REFERENCED_ROW_2') {
-      if (error.code === 'ER_DUP_ENTRY') res.status(409).json({ error: 'Booking conflicts with an existing record' });
-      else if (error.code === 'ER_NO_REFERENCED_ROW_2') res.status(400).json({ error: 'A referenced record does not exist' });
+    if (
+      error.statusCode ||
+      error.code === 'ER_DUP_ENTRY' ||
+      error.code === 'ER_NO_REFERENCED_ROW_2'
+    ) {
+      if (error.code === 'ER_DUP_ENTRY')
+        res.status(409).json({ error: 'Booking conflicts with an existing record' });
+      else if (error.code === 'ER_NO_REFERENCED_ROW_2')
+        res.status(400).json({ error: 'A referenced record does not exist' });
       else res.status(error.statusCode).json({ error: error.message });
       return;
     }
@@ -323,7 +356,8 @@ router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
       }
       updates.push('booking_status = ?');
       values.push(req.body.booking_status);
-      if (req.body.booking_status === 'Cancelled') updates.push('cancellation_time = CURRENT_TIMESTAMP');
+      if (req.body.booking_status === 'Cancelled')
+        updates.push('cancellation_time = CURRENT_TIMESTAMP');
     }
     if (req.body?.check_in_time !== undefined) {
       updates.push('check_in_time = ?');
@@ -357,7 +391,9 @@ router.delete('/bookings/:publicId', catalogueRoles, async (req, res, next) => {
       [publicId],
     );
     if (!result.affectedRows) {
-      res.status(404).json({ error: 'Booked booking not found; only Booked bookings can be cancelled' });
+      res
+        .status(404)
+        .json({ error: 'Booked booking not found; only Booked bookings can be cancelled' });
       return;
     }
     res.status(204).send();
@@ -410,7 +446,6 @@ router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) =
     if (booking.booking_status !== 'Checked-In') {
       throw validationError('Service requests can only be created for checked-in bookings');
     }
-
     const serviceId = await getServiceId(connection, servicePublicId);
     const [rooms] = await connection.execute(
       `SELECT r.room_id
@@ -422,25 +457,21 @@ router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) =
     if (!rooms.length) {
       throw validationError('room_public_id does not identify a room assigned to this booking');
     }
-
     const usageId = await nextId(connection, 'service_usage', 'usage_id');
+    const usagePublicId = randomUUID();
     await connection.execute(
       `INSERT INTO service_usage
-        (usage_id, booking_id, service_id, room_id, usage_time, quantity, status)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')`,
-      [usageId, booking.booking_id, serviceId, rooms[0].room_id, quantity],
+        (usage_id, public_id, booking_id, service_id, room_id, usage_time, quantity, status)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Pending')`,
+      [usageId, usagePublicId, booking.booking_id, serviceId, rooms[0].room_id, quantity],
     );
 
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
-
     res.status(201).json({
       data: {
-        public_id: (await connection.execute(
-          'SELECT public_id FROM service_usage WHERE usage_id = ?',
-          [usageId],
-        ))[0][0].public_id,
         booking_public_id: publicId,
+        public_id: usagePublicId,
         service_public_id: servicePublicId,
         room_public_id: roomPublicId,
         quantity,

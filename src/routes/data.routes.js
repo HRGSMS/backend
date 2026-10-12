@@ -336,9 +336,6 @@ router.patch('/service-requests/:publicId/complete', async (req, res, next) => {
     next(error);
   }
 });
-
-//TESTING TRIGGERS AND PROCEDURES
-
 router.post('/calculate-bill', async (req, res, next) => {
   const bookingPublicId = req.body?.booking_public_id;
   if (typeof bookingPublicId !== 'string' || !bookingPublicId.trim()) {
