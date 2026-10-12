@@ -316,20 +316,43 @@ router.get('/reports/occupancy', async (req, res, next) => {
   try {
     const from = parseDate(req.query.from, 'from');
     const to = parseDate(req.query.to, 'to');
+    const parameters = [to, from];
+    let branchFilter = '';
+
+    if (req.query.branch_name) {
+      parameters.push(req.query.branch_name);
+      branchFilter = 'AND b.name = ?';
+    } else if (req.query.branch_public_id) {
+      parameters.push(req.query.branch_public_id);
+      branchFilter = 'AND b.public_id = ?';
+    }
+
     const [rows] = await pool.execute(
       `
-        SELECT room_public_id, branch_public_id, booking_public_id,
-          room_number, branch_name, type_name,
-          check_in_time, check_out_time, booking_status
-        FROM report_occupancy
-        WHERE booking_id IS NULL
-          OR (
-            booking_status IN ('Booked', 'Checked-In')
-            AND check_in_time < ? AND check_out_time > ?
-          )
-        ORDER BY branch_id, room_number
+        SELECT
+          r.public_id AS room_public_id,
+          b.public_id AS branch_public_id,
+          bk.public_id AS booking_public_id,
+          r.room_number,
+          b.name AS branch_name,
+          rt.type_name,
+          bk.check_in_time,
+          bk.check_out_time,
+          bk.booking_status
+        FROM room r
+        JOIN branch b ON b.branch_id = r.branch_id
+        JOIN room_type rt ON rt.room_type_id = r.room_type_id
+        LEFT JOIN (
+          booking_room br
+          JOIN booking bk ON bk.booking_id = br.booking_id
+            AND bk.booking_status IN ('Booked', 'Checked-In')
+            AND bk.check_in_time < ?
+            AND bk.check_out_time > ?
+        ) ON br.room_id = r.room_id
+        WHERE 1 = 1 ${branchFilter}
+        ORDER BY b.branch_id, r.room_number
       `,
-      [to, from],
+      parameters,
     );
 
     res.json({ data: rows, from, to });
@@ -340,12 +363,43 @@ router.get('/reports/occupancy', async (req, res, next) => {
 
 router.get('/reports/billing', async (req, res, next) => {
   try {
+    const parameters = [];
+    let branchFilter = '';
+
+    if (req.query.branch_name) {
+      parameters.push(`%${req.query.branch_name}%`);
+      branchFilter = 'HAVING branch_names LIKE ?';
+    }
+
     const [rows] = await pool.execute(`
-      SELECT guest_public_id, booking_public_id, guest_name, booking_status, payment_status,
-        total_charge, paid_amount, calculated_outstanding_amount
-      FROM report_guest_billing
+      SELECT
+        g.public_id AS guest_public_id,
+        b.public_id AS booking_public_id,
+        CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
+        b.booking_status,
+        b.payment_status,
+        b.total_charge,
+        COALESCE(SUM(p.amount), 0) AS paid_amount,
+        b.total_charge - COALESCE(SUM(p.amount), 0) AS calculated_outstanding_amount,
+        GROUP_CONCAT(DISTINCT br_branch.name ORDER BY br_branch.name) AS branch_names
+      FROM booking b
+      JOIN guest g ON g.guest_id = b.guest_id
+      LEFT JOIN payment p ON p.booking_id = b.booking_id
+      LEFT JOIN booking_room br ON br.booking_id = b.booking_id
+      LEFT JOIN room r ON r.room_id = br.room_id
+      LEFT JOIN branch br_branch ON br_branch.branch_id = r.branch_id
+      GROUP BY
+        b.booking_id,
+        b.public_id,
+        g.public_id,
+        g.first_name,
+        g.last_name,
+        b.booking_status,
+        b.payment_status,
+        b.total_charge
+      ${branchFilter}
       ORDER BY calculated_outstanding_amount DESC
-    `);
+    `, parameters);
 
     res.json({ data: rows });
   } catch (error) {
