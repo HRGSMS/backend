@@ -101,7 +101,11 @@ function assertNoDatabaseIds(value, path = 'response') {
   if (!value || typeof value !== 'object') return;
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === 'id' || key === 'ids' || key.endsWith('_id')) {
+    if (
+      key !== 'public_id' &&
+      !key.endsWith('_public_id') &&
+      (key === 'id' || key === 'ids' || key.endsWith('_id'))
+    ) {
       throw new Error(`database identifier "${path}.${key}" was exposed`);
     }
     assertNoDatabaseIds(nestedValue, `${path}.${key}`);
@@ -312,6 +316,78 @@ async function runTests() {
       status: 400,
     },
   );
+
+  printHeader('Create, update, and delete APIs');
+  const guests = await request('GET', '/api/guests', undefined, adminCookie);
+  const rooms = await request('GET', '/api/rooms', undefined, adminCookie);
+  const services = await request('GET', '/api/services', undefined, adminCookie);
+  const guestPublicId = guests.data?.data?.[0]?.public_id;
+  const roomPublicId = rooms.data?.data?.[0]?.public_id;
+  const servicePublicId = services.data?.data?.[0]?.public_id;
+  if (!guestPublicId || !roomPublicId || !servicePublicId) {
+    throw new Error('Seeded public UUIDs are required for write API tests');
+  }
+  const testGuestEmail = `w${Date.now()}@e.co`;
+  await test('admin creates guest', 'POST', '/api/guests', {
+    cookie: adminCookie,
+    status: 201,
+    body: {
+      first_name: 'API',
+      last_name: 'Test',
+      email: testGuestEmail,
+      phone_number: '+94770000000',
+    },
+  });
+  const createdGuest = await request('GET', `/api/guests`, undefined, adminCookie);
+  const createdGuestPublicId = createdGuest.data?.data?.find((guest) => guest.email === testGuestEmail)?.public_id;
+  await test('admin updates guest', 'PATCH', `/api/guests/${createdGuestPublicId}`, {
+    cookie: adminCookie,
+    body: { phone_number: '+94771111111' },
+  });
+  await test('admin deletes guest', 'DELETE', `/api/guests/${createdGuestPublicId}`, {
+    cookie: adminCookie,
+    status: 204,
+  });
+
+  const testServiceName = `Test${Date.now()}`.slice(0, 20);
+  const createdService = await test('manager creates service', 'POST', '/api/services', {
+    cookie: managerCookie,
+    status: 201,
+    body: {
+      service_name: testServiceName,
+      service_description: 'Temporary API test service',
+      current_price: 10,
+    },
+  });
+  const createdServicePublicId = createdService?.data?.data?.public_id;
+  await test('manager updates service', 'PATCH', `/api/services/${createdServicePublicId}`, {
+    cookie: managerCookie,
+    body: { current_price: 12 },
+  });
+  await test('manager deletes service', 'DELETE', `/api/services/${createdServicePublicId}`, {
+    cookie: managerCookie,
+    status: 204,
+  });
+
+  const createdBooking = await test('front-desk creates booking', 'POST', '/api/bookings', {
+    cookie: frontDeskCookie,
+    status: 201,
+    body: {
+      guest_public_id: guestPublicId,
+      room_public_ids: [roomPublicId],
+      check_in_time: '2030-01-10T14:00:00',
+      check_out_time: '2030-01-12T11:00:00',
+    },
+  });
+  const createdBookingPublicId = createdBooking?.data?.data?.public_id;
+  await test('front-desk updates booking', 'PATCH', `/api/bookings/${createdBookingPublicId}`, {
+    cookie: frontDeskCookie,
+    body: { check_out_time: '2030-01-13T11:00:00' },
+  });
+  await test('manager deletes booking', 'DELETE', `/api/bookings/${createdBookingPublicId}`, {
+    cookie: managerCookie,
+    status: 204,
+  });
 
   printHeader('Report endpoints');
   const reportEndpoints = [

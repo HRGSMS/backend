@@ -268,6 +268,8 @@ export async function seedDatabase() {
     await connection.beginTransaction();
 
     for (const table of [
+      'notification_outbox',
+      'cancellation_policy',
       'service_usage',
       'booking_room',
       'payment',
