@@ -313,6 +313,46 @@ async function runTests() {
     },
   );
 
+  printHeader('Create, update, and delete APIs');
+  const testGuestEmail = `w${Date.now()}@e.co`;
+  await test('admin creates guest', 'POST', '/api/guests', {
+    cookie: adminCookie,
+    status: 201,
+    body: {
+      first_name: 'API',
+      last_name: 'Test',
+      email: testGuestEmail,
+      phone_number: '+94770000000',
+    },
+  });
+  await test('admin updates guest', 'PATCH', `/api/guests/${testGuestEmail}`, {
+    cookie: adminCookie,
+    body: { phone_number: '+94771111111' },
+  });
+  await test('admin deletes guest', 'DELETE', `/api/guests/${testGuestEmail}`, {
+    cookie: adminCookie,
+    status: 204,
+  });
+
+  const testServiceName = `Test${Date.now()}`.slice(0, 20);
+  await test('manager creates service', 'POST', '/api/services', {
+    cookie: managerCookie,
+    status: 201,
+    body: {
+      service_name: testServiceName,
+      service_description: 'Temporary API test service',
+      current_price: 10,
+    },
+  });
+  await test('manager updates service', 'PATCH', `/api/services/${testServiceName}`, {
+    cookie: managerCookie,
+    body: { current_price: 12 },
+  });
+  await test('manager deletes service', 'DELETE', `/api/services/${testServiceName}`, {
+    cookie: managerCookie,
+    status: 204,
+  });
+
   printHeader('Report endpoints');
   const reportEndpoints = [
     ['/api/reports/occupancy?from=2026-10-01&to=2026-10-31', 'occupancy report'],

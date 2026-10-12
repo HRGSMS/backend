@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './lib/auth.js';
 import dataRoutes from './routes/data.routes.js';
+import writeRoutes from './routes/write.routes.js';
 import { requireAuth } from './middleware/require-auth.middleware.js';
 
 export function createApp() {
@@ -30,6 +31,7 @@ export function createApp() {
   });
 
   app.use('/api', requireAuth, dataRoutes);
+  app.use('/api', requireAuth, writeRoutes);
 
   app.use((error, req, res, next) => {
     if (res.headersSent) {

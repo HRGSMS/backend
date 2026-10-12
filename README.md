@@ -255,6 +255,93 @@ const result = await response.json();
 The backend returns successful collection responses in the form
 `{ "data": [...] }`. Unauthenticated requests receive HTTP `401`.
 
+### Create, update, and delete records
+
+Write APIs require an authenticated session and never accept database primary
+key values from the frontend. Use `guest_email`, `service_name`,
+`room_number`, and the returned `booking_reference` instead.
+
+All hotel staff roles can manage guests, bookings, payments, and service usage.
+Only `admin` and `manager` can manage the service catalogue or cancel a
+booking through `DELETE`.
+
+```text
+POST   /api/guests
+PATCH  /api/guests/:email
+DELETE /api/guests/:email
+
+POST   /api/services
+PATCH  /api/services/:serviceName
+DELETE /api/services/:serviceName
+
+POST   /api/bookings
+PATCH  /api/bookings/:bookingReference
+DELETE /api/bookings/:bookingReference
+POST   /api/bookings/:bookingReference/payments
+POST   /api/bookings/:bookingReference/services
+```
+
+Create a guest:
+
+```js
+await fetch('http://localhost:4000/api/guests', {
+  ...authRequestOptions,
+  method: 'POST',
+  body: JSON.stringify({
+    first_name: 'Amina',
+    last_name: 'Perera',
+    email: 'amina@example.com',
+    phone_number: '+94771234567',
+  }),
+});
+```
+
+Create a booking without exposing room or guest IDs:
+
+```js
+const response = await fetch('http://localhost:4000/api/bookings', {
+  ...authRequestOptions,
+  method: 'POST',
+  body: JSON.stringify({
+    guest_email: 'amina@example.com',
+    room_numbers: ['204'],
+    check_in_time: '2026-11-10T14:00:00',
+    check_out_time: '2026-11-13T11:00:00',
+  }),
+});
+
+const { data } = await response.json();
+// data.booking_reference is used for later booking operations.
+```
+
+Add a payment or service usage to a booking:
+
+```js
+await fetch(`http://localhost:4000/api/bookings/${data.booking_reference}/payments`, {
+  ...authRequestOptions,
+  method: 'POST',
+  body: JSON.stringify({
+    payment_method: 'Card',
+    amount: 15000,
+  }),
+});
+
+await fetch(`http://localhost:4000/api/bookings/${data.booking_reference}/services`, {
+  ...authRequestOptions,
+  method: 'POST',
+  body: JSON.stringify({
+    service_name: 'Room Service',
+    room_number: '204',
+    quantity: 1,
+  }),
+});
+```
+
+Booking creation runs in a transaction and checks overlapping active bookings
+before assigning rooms. Payment and service writes recalculate the booking
+bill using the existing database procedure. Foreign-key and database trigger
+errors are returned as explicit `400`, `409`, or `404` responses.
+
 ### Reference data
 
 ```text
