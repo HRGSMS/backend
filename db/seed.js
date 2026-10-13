@@ -171,7 +171,7 @@ const bookings = [
     'Partially Paid',
     165000,
     100000,
-    3,
+    1,
     29700,
   ],
   [
@@ -185,7 +185,7 @@ const bookings = [
     'Unpaid',
     90000,
     90000,
-    1,
+    3,
     16200,
   ],
   [
@@ -199,7 +199,7 @@ const bookings = [
     'Refunded',
     0,
     0,
-    2,
+    3,
     0,
   ],
 ];

@@ -823,7 +823,7 @@ const payments = [
 
   // Booking 2: Multi-room split payment (Deposit 150,000 + Checkout balance)
   [2, 2, '2026-08-26 14:00:00', 'Bank Transfer', 150000],
-  [3, 2, '2026-09-14 10:45:00', 'Card', 195100], // Settles total 345,100
+  [3, 2, '2026-09-14 10:45:00', 'Card', 195740], // Settles total 345,740
 
   // Booking 3: Active stay deposit (Partial Payment)
   [4, 3, '2026-09-22 11:00:00', 'Card', 120000],
@@ -849,7 +849,7 @@ const payments = [
   // Booking 13: Extended stay 3 installments
   [11, 13, '2026-07-22 10:00:00', 'Bank Transfer', 100000],
   [12, 13, '2026-08-10 15:00:00', 'Card', 150000],
-  [13, 13, '2026-08-24 10:15:00', 'Card', 137380], // Settles total 387,380
+  [13, 13, '2026-08-24 10:15:00', 'Card', 144120], // Settles total 394,120
 
   // Booking 14: Turnover A settled
   [14, 14, '2026-09-08 10:30:00', 'Card', 60180],
