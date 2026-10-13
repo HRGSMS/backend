@@ -266,6 +266,66 @@ export async function ensureServiceUsageStatus(connection) {
   }
 }
 
+/**
+ * Ensures runtime compatibility for tables, columns, and default configs.
+ * Idempotent: safe to run on every server startup.
+ *
+ * @param {import('mysql2/promise').PoolConnection} connection Database connection.
+ * @returns {Promise<void>}
+ */
+export async function ensureSchemaCompatibility(connection) {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS \`hotel_config\` (
+      \`config_key\`   VARCHAR(80)   NOT NULL,
+      \`config_value\` VARCHAR(255)  NOT NULL,
+      \`description\`  VARCHAR(255)  NULL,
+      PRIMARY KEY (\`config_key\`)
+    )
+  `);
+
+  const [configRows] = await connection.execute('SELECT COUNT(*) AS cnt FROM `hotel_config`');
+  if (configRows[0].cnt === 0) {
+    await connection.query(`
+      INSERT INTO \`hotel_config\` (config_key, config_value, description) VALUES
+        ('hotel_name', 'SkyNest Hotels', 'Display name shown across the portal and emails'),
+        ('hotel_tagline', 'Luxury Stays & Serenity', 'Brand tagline displayed in hero headers'),
+        ('hotel_description', 'Discover tailored comfort across our Sri Lanka locations. Book with flexible half-payments and personalise your stay.', 'Overview blurb displayed on the public rooms page'),
+        ('hotline_number', '0760218879', 'Contact phone number displayed to guests'),
+        ('hotline_label', '24/7 Hotel Hotline', 'Label rendered alongside the hotline phone number'),
+        ('checkin_time', '14:00', 'Standard check-in time of day'),
+        ('checkout_time', '11:00', 'Standard check-out time of day'),
+        ('currency', 'LKR', 'Three-letter currency symbol for billing displays'),
+        ('copyright_text', 'Dedicated to comfort, elegance, and peace.', 'Footer note displayed across public guest views')
+      ON DUPLICATE KEY UPDATE config_value = config_value
+    `);
+  }
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS \`payment_method\` (
+      \`method_id\`    INT          NOT NULL AUTO_INCREMENT,
+      \`public_id\`    CHAR(36)     NOT NULL UNIQUE DEFAULT (UUID()),
+      \`method_name\`  VARCHAR(60)  NOT NULL UNIQUE,
+      \`display_name\` VARCHAR(80)  NOT NULL,
+      \`is_active\`    TINYINT(1)   NOT NULL DEFAULT 1,
+      PRIMARY KEY (\`method_id\`)
+    )
+  `);
+
+  const [pmRows] = await connection.execute('SELECT COUNT(*) AS cnt FROM `payment_method`');
+  if (pmRows[0].cnt === 0) {
+    await connection.query(`
+      INSERT INTO \`payment_method\` (public_id, method_name, display_name, is_active) VALUES
+        (UUID(), 'Credit Card',     'Credit / Debit Card',   1),
+        (UUID(), 'Online Transfer', 'Online Bank Transfer',  1),
+        (UUID(), 'Cash Deposit',    'Direct Deposit',        1)
+      ON DUPLICATE KEY UPDATE method_name = method_name
+    `);
+  }
+
+  await ensureGuestAuthLink(connection);
+  await ensureServiceUsageStatus(connection);
+}
+
 const viewDefinitions = [
   `
     CREATE OR REPLACE VIEW \`report_occupancy\` AS

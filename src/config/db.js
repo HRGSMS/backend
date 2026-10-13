@@ -24,6 +24,8 @@ export async function connectToDatabase() {
   try {
     await connection.ping();
     console.log('Connected to MySQL');
+    const { ensureSchemaCompatibility } = await import('../../db/init.js');
+    await ensureSchemaCompatibility(connection);
   } finally {
     connection.release();
   }

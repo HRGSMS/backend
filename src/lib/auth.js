@@ -3,7 +3,10 @@ import { admin } from 'better-auth/plugins';
 import { pool } from '../config/db.js';
 
 const baseURL = process.env.BETTER_AUTH_URL || `http://localhost:${process.env.PORT || 4000}`;
-const secureCookies = new URL(baseURL).protocol === 'https:';
+const secureCookies =
+  process.env.COOKIE_SECURE === 'true' ||
+  process.env.NODE_ENV === 'production' ||
+  new URL(baseURL).protocol === 'https:';
 
 /**
  * Better Auth server configuration backed by the existing MySQL database.
@@ -17,7 +20,7 @@ export const authOptions = {
   baseURL,
   trustedOrigins: ['*'],
   advanced: {
-    // Vercel and the API may be on different sites. HTTP localhost stays lax.
+    // Cross-site cookie support for HTTPS/production while preserving local HTTP
     useSecureCookies: secureCookies,
     defaultCookieAttributes: {
       sameSite: secureCookies ? 'none' : 'lax',

@@ -86,7 +86,19 @@ router.get('/bookings', async (req, res, next) => {
        LEFT JOIN branch br_branch ON br_branch.branch_id = r.branch_id
        LEFT JOIN room_type rt ON rt.room_type_id = r.room_type_id
        WHERE b.guest_id = ?
-       GROUP BY b.booking_id
+       GROUP BY
+         b.booking_id,
+         b.public_id,
+         b.booking_time,
+         b.check_in_time,
+         b.check_out_time,
+         b.cancellation_time,
+         b.booking_status,
+         b.payment_status,
+         b.total_charge,
+         b.outstanding_amount,
+         b.total_tax_amount,
+         b.cancellation_fee
        ORDER BY b.check_in_time DESC`,
       [req.guest.guest_id],
     );
