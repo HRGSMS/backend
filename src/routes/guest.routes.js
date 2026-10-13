@@ -369,15 +369,53 @@ router.post('/bookings/:publicId/payments', async (req, res, next) => {
       [paymentId, paymentPublicId, booking.booking_id, paymentMethod.trim(), amount],
     );
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
+
+    const [updatedRows] = await connection.execute(
+      'SELECT outstanding_amount, payment_status, total_charge FROM booking WHERE booking_id = ?',
+      [booking.booking_id],
+    );
     await connection.commit();
+
+    // Prepare SMS message notification for the logged-in guest
+    const recipientPhone = (req.body?.phone_number || req.guest.phone_number || '').trim();
+    const shortRef = publicId.slice(0, 8).toUpperCase();
+    const guestName = req.guest.first_name || 'Guest';
+    const remainingDue = Number(updatedRows[0]?.outstanding_amount ?? 0);
+    const isFullyPaid = remainingDue <= 0;
+    const statusNote = isFullyPaid
+      ? 'Fully Paid'
+      : `Remaining Balance: LKR ${remainingDue.toLocaleString()}`;
+    const smsMessage = `SkyNest Hotels: Dear ${guestName}, your payment of LKR ${amount.toLocaleString()} for Reservation #${shortRef} has been successfully processed. Status: ${statusNote}. Thank you for staying with SkyNest Hotels!`;
+
+    // Simulated SMS Gateway Dispatch
+    console.log(`[SMS Gateway] Dispatched payment confirmation to ${recipientPhone || 'registered phone'}: "${smsMessage}"`);
+
     notifyStaff({
       type: 'payment.created',
       message: 'A guest made a payment',
-      data: { public_id: paymentPublicId, booking_public_id: publicId, amount },
+      data: {
+        public_id: paymentPublicId,
+        booking_public_id: publicId,
+        amount,
+        phone_number: recipientPhone,
+      },
     });
-    res
-      .status(201)
-      .json({ data: { public_id: paymentPublicId, booking_public_id: publicId, amount } });
+
+    res.status(201).json({
+      data: {
+        public_id: paymentPublicId,
+        booking_public_id: publicId,
+        amount,
+        outstanding_amount: updatedRows[0]?.outstanding_amount,
+        payment_status: updatedRows[0]?.payment_status,
+        sms_notification: {
+          sent: Boolean(recipientPhone),
+          phone_number: recipientPhone,
+          message: smsMessage,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
   } catch (error) {
     if (connection) await connection.rollback();
     next(error);
