@@ -22,6 +22,15 @@ export const authOptions = {
     enabled: true,
     disableSignUp: true,
   },
+  user: {
+    additionalFields: {
+      guestPublicId: {
+        type: 'string',
+        required: false,
+        input: true,
+      },
+    },
+  },
   plugins: [
     admin({
       defaultRole: 'front_desk',

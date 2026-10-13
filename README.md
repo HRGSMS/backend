@@ -408,6 +408,25 @@ Current notification types are:
 - `payment.created`
 - `booking.bill_recalculated`
 
+### Guest accounts
+
+Guest accounts use Better Auth with role `guest` and must include the
+`guestPublicId` user field linking them to a row in `guest`. Guest endpoints
+are scoped to that linked profile:
+
+```text
+GET    /api/guest/profile
+GET    /api/guest/bookings
+POST   /api/guest/bookings
+POST   /api/guest/bookings/:publicId/cancel
+POST   /api/guest/bookings/:publicId/services
+DELETE /api/guest/service-requests/:publicId
+POST   /api/guest/bookings/:publicId/payments
+```
+
+Payments currently record an internal payment; no external payment gateway is
+integrated. Guest service requests can be cancelled while they are `Pending`.
+
 Unauthenticated sockets are rejected, and notifications are delivered only to
 authenticated `admin`, `manager`, and `front_desk` clients.
 
