@@ -423,31 +423,6 @@ router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
   }
 });
 
-router.delete('/bookings/:publicId', catalogueRoles, async (req, res, next) => {
-  try {
-    const publicId = requiredString(req.params.publicId, 'public_id', 36);
-    const [result] = await pool.execute(
-      `UPDATE booking SET booking_status = 'Cancelled', cancellation_time = CURRENT_TIMESTAMP
-       WHERE public_id = ? AND booking_status = 'Booked'`,
-      [publicId],
-    );
-    if (!result.affectedRows) {
-      res
-        .status(404)
-        .json({ error: 'Booked booking not found; only Booked bookings can be cancelled' });
-      return;
-    }
-    notifyStaff({
-      type: 'booking.cancelled',
-      message: 'A booking was cancelled',
-      data: { public_id: publicId },
-    });
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
-
 router.post('/bookings/:publicId/payments', staffRoles, async (req, res, next) => {
   let connection;
   try {

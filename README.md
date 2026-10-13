@@ -362,18 +362,23 @@ cannot create users, change roles, or list users.
 
 ## Data APIs
 
-All data APIs require an authenticated Better Auth session cookie. Frontend
-requests must use `credentials: 'include'`:
+Most data APIs require an authenticated Better Auth session cookie. However,
+the room listing and availability endpoint (`GET /api/rooms`) is publicly
+accessible without logging in, allowing guests and visitors to browse
+available rooms.
+
+For authenticated endpoints, frontend requests must use
+`credentials: 'include'`:
 
 ```js
-const response = await fetch('http://localhost:4000/api/rooms', {
+const response = await fetch('http://localhost:4000/api/branches', {
   credentials: 'include',
 });
 const result = await response.json();
 ```
 
 The backend returns successful collection responses in the form
-`{ "data": [...] }`. Unauthenticated requests receive HTTP `401`.
+`{ "data": [...] }`. Unauthenticated requests to protected endpoints receive HTTP `401`.
 
 ### Create, update, and delete records
 
@@ -397,7 +402,7 @@ DELETE /api/services/:publicId
 
 POST   /api/bookings
 PATCH  /api/bookings/:publicId
-DELETE /api/bookings/:publicId
+POST   /api/cancel-booking
 POST   /api/bookings/:publicId/payments
 POST   /api/bookings/:publicId/services
 
@@ -451,6 +456,10 @@ POST   /api/guest/bookings/:publicId/payments
 
 Payments currently record an internal payment; no external payment gateway is
 integrated. Guest service requests can be cancelled while they are `Pending`.
+Staff can cancel pending service requests with
+`DELETE /api/service-requests/:publicId`. All staff roles can manage guest
+reservations, service requests, and payments. Staff reservation cancellation
+uses the policy-aware `POST /api/cancel-booking` endpoint.
 
 An administrator can still create a staff account through Better Auth:
 
@@ -561,6 +570,7 @@ GET /api/rooms
 GET /api/rooms?available_from=2026-10-20&available_to=2026-10-23
 ```
 
+Viewing rooms and checking availability does not require logging in.
 The availability query excludes rooms with an overlapping `Booked` or
 `Checked-In` booking. Dates are interpreted as an exclusive end interval.
 
