@@ -331,9 +331,33 @@ Content-Type: application/json
 }
 ```
 
-#### 5. Staff Administration (Admin Only)
+#### 5. Update Password (Self-Service)
+Any logged-in staff member or guest can update their own password:
+```http
+POST /api/auth/change-password
+Content-Type: application/json
+
+{
+  "currentPassword": "current_password",
+  "newPassword": "new_secure_password",
+  "revokeOtherSessions": true
+}
+```
+*Note:* Requires an active session cookie (`credentials: 'include'`). The new password must be at least 8 characters. Setting `revokeOtherSessions: true` revokes all other active sessions for that account.
+
+#### 6. Staff Administration (Admin Only)
 - **Create Staff User**: `POST /api/auth/admin/create-user` (Roles: `admin`, `manager`, `front_desk`)
 - **Change User Role**: `POST /api/auth/admin/set-role`
+- **Reset User Password**: `POST /api/auth/admin/set-user-password`
+  ```http
+  POST /api/auth/admin/set-user-password
+  Content-Type: application/json
+
+  {
+    "userId": "USER_ID_FROM_LIST_USERS",
+    "newPassword": "new_temporary_password"
+  }
+  ```
 - **List All Users**: `GET /api/auth/admin/list-users?limit=100`
 
 ---
