@@ -142,10 +142,13 @@ password hashing:
 ```bash
 npm run auth:seed
 ```
-Testing Current implemented triggers 
+
+Testing Current implemented triggers
+
 ```bash
 npm run db:test-triggers
 ```
+
 Authentication endpoints are available under `/api/auth`. The configured
 Better Auth admin plugin disables public sign-up and allows only users with
 the `admin` role to create users or change roles.
@@ -194,18 +197,21 @@ The response contains the authenticated user and session information. Store
 the cookie through the browser; do not store the password or session token in
 local storage.
 
-
 ### Calculate - Bill
+
 ```
 POST http://localhost:4000/api/calculate-bill
 ```
+
 Content-Type: application/json
+
 ```
-Body(Whule logged in): 
+Body(Whule logged in):
 {
   "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
 }
 ```
+
 ### Cancel booking
 
 Requires a logged-in session. Replace the UUID with an existing
@@ -260,17 +266,35 @@ await fetch('http://localhost:4000/api/auth/sign-out', {
 });
 ```
 
-### Public sign-up
+### Guest sign-up
 
-Public sign-up is intentionally disabled because only admins may create
-accounts. The following endpoint must not be used by the frontend:
+Guests can create their own account and hotel guest profile:
 
 ```http
-POST /api/auth/sign-up/email
+POST /api/auth/guest-sign-up
 ```
 
-It returns an error with public registration disabled. New accounts must be
-created by an authenticated admin through the admin endpoint below.
+```js
+await fetch('http://localhost:4000/api/auth/guest-sign-up', {
+  ...authRequestOptions,
+  method: 'POST',
+  body: JSON.stringify({
+    first_name: 'Amina',
+    last_name: 'Perera',
+    email: 'amina@example.com',
+    phone_number: '+94771234567',
+    password: 'a-secure-password',
+  }),
+});
+```
+
+The endpoint creates the Better Auth account, creates the corresponding
+`guest` row, assigns role `guest`, and links the account to the guest row.
+Profile fields remain in the `guest` table; only the link is stored on the
+Better Auth user. The frontend should sign in after successful registration
+using `POST /api/auth/sign-in/email` with the submitted email and password.
+The lower-level Better Auth `POST /api/auth/sign-up/email` endpoint remains
+disabled.
 
 ### Admin: create a user
 
@@ -295,7 +319,7 @@ const response = await fetch('http://localhost:4000/api/auth/admin/create-user',
 const createdUser = await response.json();
 ```
 
-Supported application roles are `admin`, `manager`, and `front_desk`.
+Supported application roles are `admin`, `manager`, `front_desk`, and `guest`.
 
 ### Admin: change a user's role
 
@@ -402,11 +426,46 @@ Current notification types are:
 
 - `service_request.created`
 - `service_request.completed`
+- `service_request.cancelled`
 - `guest.created`, `guest.updated`, `guest.deleted`
 - `service_catalogue.created`, `service_catalogue.updated`, `service_catalogue.deleted`
 - `booking.created`, `booking.updated`, `booking.cancelled`
 - `payment.created`
 - `booking.bill_recalculated`
+
+### Guest accounts
+
+Guest accounts use Better Auth with role `guest` and must include the
+`guestPublicId` user field linking them to a row in `guest`. Guest endpoints
+are scoped to that linked profile:
+
+```text
+GET    /api/guest/profile
+GET    /api/guest/bookings
+POST   /api/guest/bookings
+POST   /api/guest/bookings/:publicId/cancel
+POST   /api/guest/bookings/:publicId/services
+DELETE /api/guest/service-requests/:publicId
+POST   /api/guest/bookings/:publicId/payments
+```
+
+Payments currently record an internal payment; no external payment gateway is
+integrated. Guest service requests can be cancelled while they are `Pending`.
+
+An administrator can still create a staff account through Better Auth:
+
+```js
+await fetch('http://localhost:4000/api/auth/admin/create-user', {
+  ...authRequestOptions,
+  method: 'POST',
+  body: JSON.stringify({
+    name: 'New Employee',
+    email: 'amina@example.com',
+    password: 'employee-password',
+    role: 'manager',
+  }),
+});
+```
 
 Unauthenticated sockets are rejected, and notifications are delivered only to
 authenticated `admin`, `manager`, and `front_desk` clients.

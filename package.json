@@ -12,7 +12,7 @@
     "db:destroy": "node db/destroy.js",
     "db:recreate": "node db/recreate.js && npm run db:init && npm run auth:migrate && npm run db:seed && npm run auth:seed",
     "db:test-triggers": "DB_USE_ADMIN=true node db/test-triggers.js",
-    "auth:migrate": "DB_USE_ADMIN=true npx auth@latest migrate",
+    "auth:migrate": "DB_USE_ADMIN=true npx auth@latest migrate && DB_USE_ADMIN=true node db/migrate-guest-auth.js",
     "auth:seed": "node db/seed-auth.js",
     "api:test": "node scripts/api-tests.js",
     "migrate": "DB_USE_ADMIN=true node db/migrate.js",

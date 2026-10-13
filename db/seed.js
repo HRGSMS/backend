@@ -337,6 +337,7 @@ export async function seedDatabase() {
     await insertRows(
       connection,
       'guest',
+      // public_id is omitted intentionally; the schema generates it with UUID().
       ['guest_id', 'first_name', 'last_name', 'email', 'phone_number'],
       guests,
     );

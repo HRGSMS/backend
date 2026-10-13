@@ -191,6 +191,41 @@ const tableDefinitions = [
   `,
 ];
 
+/**
+ * Ensures Better Auth users can link to the existing guest.public_id value.
+ *
+ * Better Auth owns the user table, so this is intentionally idempotent and
+ * only runs when that table already exists.
+ *
+ * @param {import('mysql2/promise').PoolConnection} connection Database connection.
+ * @returns {Promise<void>} Resolves after the link column is available.
+ */
+export async function ensureGuestAuthLink(connection) {
+  const [tables] = await connection.execute(
+    `SELECT 1
+     FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'user'`,
+  );
+
+  if (!tables.length) {
+    return;
+  }
+
+  const [columns] = await connection.execute(
+    `SELECT 1
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'user'
+       AND COLUMN_NAME = 'guestPublicId'`,
+  );
+
+  if (!columns.length) {
+    await connection.query('ALTER TABLE `user` ADD COLUMN `guestPublicId` CHAR(36) NULL');
+    console.log('Added Better Auth user.guestPublicId link column');
+  }
+}
+
 const viewDefinitions = [
   `
     CREATE OR REPLACE VIEW \`report_occupancy\` AS
@@ -316,6 +351,7 @@ export async function initializeDatabase(database = pool) {
       await connection.query(definition);
     }
 
+    await ensureGuestAuthLink(connection);
     await installTriggers(connection);
 
     for (const definition of viewDefinitions) {
