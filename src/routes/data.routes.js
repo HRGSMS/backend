@@ -122,7 +122,7 @@ router.get('/rooms', async (req, res, next) => {
         throw error;
       }
 
-      parameters.push(availableFrom, availableTo, availableTo, availableFrom);
+      parameters.push(availableTo, availableFrom);
       availabilityFilter += `
         AND NOT EXISTS (
           SELECT 1
