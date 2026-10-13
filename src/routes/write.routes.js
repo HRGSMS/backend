@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { pool } from '../config/db.js';
 import { requireRole } from '../middleware/require-role.middleware.js';
+import { notifyStaff } from '../sockets/index.js';
 
 const router = Router();
 const staffRoles = requireRole('admin', 'manager', 'front_desk');
@@ -113,6 +114,11 @@ router.post('/guests', staffRoles, async (req, res, next) => {
         [guestId, publicId, firstName, lastName, email, phoneNumber],
       );
       await connection.commit();
+      notifyStaff({
+        type: 'guest.created',
+        message: 'A guest record was created',
+        data: { public_id: publicId },
+      });
       res.status(201).json({
         data: {
           public_id: publicId,
@@ -156,6 +162,11 @@ router.patch('/guests/:publicId', staffRoles, async (req, res, next) => {
       res.status(404).json({ error: 'Guest not found' });
       return;
     }
+    notifyStaff({
+      type: 'guest.updated',
+      message: 'A guest record was updated',
+      data: { public_id: publicId },
+    });
     res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
@@ -174,6 +185,11 @@ router.delete('/guests/:publicId', staffRoles, async (req, res, next) => {
       res.status(404).json({ error: 'Guest not found' });
       return;
     }
+    notifyStaff({
+      type: 'guest.deleted',
+      message: 'A guest record was deleted',
+      data: { public_id: publicId },
+    });
     res.status(204).send();
   } catch (error) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
@@ -202,6 +218,11 @@ router.post('/services', catalogueRoles, async (req, res, next) => {
         [serviceId, publicId, serviceName, description, price, taxId],
       );
       await connection.commit();
+      notifyStaff({
+        type: 'service_catalogue.created',
+        message: 'A service catalogue item was created',
+        data: { public_id: publicId, service_name: serviceName },
+      });
       res.status(201).json({
         data: {
           public_id: publicId,
@@ -244,6 +265,11 @@ router.patch('/services/:publicId', catalogueRoles, async (req, res, next) => {
       res.status(404).json({ error: 'Service not found' });
       return;
     }
+    notifyStaff({
+      type: 'service_catalogue.updated',
+      message: 'A service catalogue item was updated',
+      data: { public_id: publicId },
+    });
     res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
     next(error);
@@ -260,6 +286,11 @@ router.delete('/services/:publicId', catalogueRoles, async (req, res, next) => {
       res.status(404).json({ error: 'Service not found' });
       return;
     }
+    notifyStaff({
+      type: 'service_catalogue.deleted',
+      message: 'A service catalogue item was deleted',
+      data: { public_id: publicId },
+    });
     res.status(204).send();
   } catch (error) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
@@ -322,6 +353,11 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
       );
     }
     await connection.commit();
+    notifyStaff({
+      type: 'booking.created',
+      message: 'A booking was created',
+      data: { public_id: publicId, booking_status: status },
+    });
     res.status(201).json({
       data: { public_id: publicId, booking_reference: bookingReference, booking_status: status },
     });
@@ -376,6 +412,11 @@ router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
       res.status(404).json({ error: 'Booking not found' });
       return;
     }
+    notifyStaff({
+      type: 'booking.updated',
+      message: 'A booking was updated',
+      data: { public_id: publicId },
+    });
     res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
     next(error);
@@ -396,6 +437,11 @@ router.delete('/bookings/:publicId', catalogueRoles, async (req, res, next) => {
         .json({ error: 'Booked booking not found; only Booked bookings can be cancelled' });
       return;
     }
+    notifyStaff({
+      type: 'booking.cancelled',
+      message: 'A booking was cancelled',
+      data: { public_id: publicId },
+    });
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -419,6 +465,11 @@ router.post('/bookings/:publicId/payments', staffRoles, async (req, res, next) =
     );
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
+    notifyStaff({
+      type: 'payment.created',
+      message: 'A payment was recorded',
+      data: { booking_public_id: publicId, amount, payment_method: paymentMethod },
+    });
     res.status(201).json({ data: { public_id: publicId, amount, payment_method: paymentMethod } });
   } catch (error) {
     if (connection) await connection.rollback();
@@ -468,6 +519,17 @@ router.post('/bookings/:publicId/services', staffRoles, async (req, res, next) =
 
     await connection.execute('CALL sp_calculate_bill(?)', [booking.booking_id]);
     await connection.commit();
+    notifyStaff({
+      type: 'service_request.created',
+      message: 'A new guest service request was created',
+      data: {
+        public_id: usagePublicId,
+        booking_public_id: publicId,
+        service_public_id: servicePublicId,
+        room_public_id: roomPublicId,
+        quantity,
+      },
+    });
     res.status(201).json({
       data: {
         booking_public_id: publicId,
