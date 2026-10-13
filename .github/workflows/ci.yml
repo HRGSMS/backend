@@ -1,0 +1,29 @@
+# Copy to .github/workflows/ci.yml in the BACKEND repository.
+# Render handles CD: select main and Auto-Deploy = After CI Checks Pass.
+name: Backend CI
+
+on:
+  push:
+    branches: [main, deployment]
+  pull_request:
+    branches: [main, deployment]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - name: Check JavaScript syntax
+        run: find src db scripts -type f -name '*.js' -print0 | xargs -0 -n 1 node --check
