@@ -584,12 +584,16 @@ router.get('/reports/billing', async (req, res, next) => {
         b.booking_status,
         b.payment_status,
         b.total_charge,
-        COALESCE(SUM(p.amount), 0) AS paid_amount,
-        b.total_charge - COALESCE(SUM(p.amount), 0) AS calculated_outstanding_amount,
+        COALESCE(p.paid_amount, 0) AS paid_amount,
+        b.total_charge - COALESCE(p.paid_amount, 0) AS calculated_outstanding_amount,
         GROUP_CONCAT(DISTINCT br_branch.name ORDER BY br_branch.name) AS branch_names
       FROM booking b
       JOIN guest g ON g.guest_id = b.guest_id
-      LEFT JOIN payment p ON p.booking_id = b.booking_id
+      LEFT JOIN (
+        SELECT booking_id, SUM(amount) AS paid_amount
+        FROM payment
+        GROUP BY booking_id
+      ) p ON p.booking_id = b.booking_id
       LEFT JOIN booking_room br ON br.booking_id = b.booking_id
       LEFT JOIN room r ON r.room_id = br.room_id
       LEFT JOIN branch br_branch ON br_branch.branch_id = r.branch_id
@@ -601,7 +605,8 @@ router.get('/reports/billing', async (req, res, next) => {
         g.last_name,
         b.booking_status,
         b.payment_status,
-        b.total_charge
+        b.total_charge,
+        p.paid_amount
       ${branchFilter}
       ORDER BY calculated_outstanding_amount DESC
     `,
