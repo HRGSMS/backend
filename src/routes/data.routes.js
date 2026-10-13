@@ -139,23 +139,72 @@ router.get('/rooms', async (req, res, next) => {
     const [rows] = await pool.execute(
       `
         SELECT
-          b.name AS branch_name,
+          b.public_id   AS branch_public_id,
+          b.name        AS branch_name,
           rt.type_name,
           rt.capacity,
           rt.daily_rate,
           r.public_id,
           r.room_number,
           r.current_status,
-          r.booking_availability
+          r.booking_availability,
+          COALESCE(
+            GROUP_CONCAT(
+              DISTINCT a.amenity_name
+              ORDER BY a.amenity_name
+              SEPARATOR ', '
+            ),
+            ''
+          ) AS amenities
         FROM room r
-        JOIN branch b ON b.branch_id = r.branch_id
-        JOIN room_type rt ON rt.room_type_id = r.room_type_id
+        JOIN branch b   ON b.branch_id       = r.branch_id
+        JOIN room_type rt ON rt.room_type_id  = r.room_type_id
+        LEFT JOIN room_amenity ra       ON ra.room_type_id  = rt.room_type_id
+        LEFT JOIN amenity a             ON a.amenity_id     = ra.amenity_id
         WHERE 1 = 1 ${availabilityFilter}
+        GROUP BY
+          r.room_id, r.public_id, r.room_number, r.current_status, r.booking_availability,
+          b.public_id, b.name,
+          rt.type_name, rt.capacity, rt.daily_rate
         ORDER BY b.name, r.room_number
       `,
       parameters,
     );
 
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /hotel-config
+ * Returns hotel-wide public configuration values (name, hotline, check-in/out times, etc.).
+ * No authentication required — used by guest-facing pages.
+ */
+router.get('/hotel-config', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT config_key, config_value FROM hotel_config',
+    );
+    // Convert rows to a flat key→value object for easy frontend consumption
+    const config = Object.fromEntries(rows.map((r) => [r.config_key, r.config_value]));
+    res.json({ data: config });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /payment-methods
+ * Returns active payment methods from the database.
+ * No authentication required — used at booking checkout and payment modals.
+ */
+router.get('/payment-methods', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT public_id, method_name, display_name FROM payment_method WHERE is_active = 1 ORDER BY method_id',
+    );
     res.json({ data: rows });
   } catch (error) {
     next(error);
@@ -584,12 +633,16 @@ router.get('/reports/billing', async (req, res, next) => {
         b.booking_status,
         b.payment_status,
         b.total_charge,
-        COALESCE(SUM(p.amount), 0) AS paid_amount,
-        b.total_charge - COALESCE(SUM(p.amount), 0) AS calculated_outstanding_amount,
+        COALESCE(p.paid_amount, 0) AS paid_amount,
+        b.total_charge - COALESCE(p.paid_amount, 0) AS calculated_outstanding_amount,
         GROUP_CONCAT(DISTINCT br_branch.name ORDER BY br_branch.name) AS branch_names
       FROM booking b
       JOIN guest g ON g.guest_id = b.guest_id
-      LEFT JOIN payment p ON p.booking_id = b.booking_id
+      LEFT JOIN (
+        SELECT booking_id, SUM(amount) AS paid_amount
+        FROM payment
+        GROUP BY booking_id
+      ) p ON p.booking_id = b.booking_id
       LEFT JOIN booking_room br ON br.booking_id = b.booking_id
       LEFT JOIN room r ON r.room_id = br.room_id
       LEFT JOIN branch br_branch ON br_branch.branch_id = r.branch_id
@@ -601,7 +654,8 @@ router.get('/reports/billing', async (req, res, next) => {
         g.last_name,
         b.booking_status,
         b.payment_status,
-        b.total_charge
+        b.total_charge,
+        p.paid_amount
       ${branchFilter}
       ORDER BY calculated_outstanding_amount DESC
     `,

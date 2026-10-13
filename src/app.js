@@ -36,10 +36,17 @@ export function createApp() {
     res.status(200).json({ status: 'ok' });
   });
 
+  // Public read routes used by the guest-facing portal (no auth required)
+  const PUBLIC_GET_PATHS = [
+    /^\/rooms\/?$/,
+    /^\/hotel-config\/?$/,
+    /^\/payment-methods\/?$/,
+  ];
+
   app.use(
     '/api',
     (req, res, next) => {
-      if (req.method === 'GET' && /^\/rooms\/?$/.test(req.path)) {
+      if (req.method === 'GET' && PUBLIC_GET_PATHS.some((re) => re.test(req.path))) {
         return optionalAuth(req, res, next);
       }
       return requireAuth(req, res, next);

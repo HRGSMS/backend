@@ -15,6 +15,7 @@
     "auth:migrate": "DB_USE_ADMIN=true npx auth@latest migrate && DB_USE_ADMIN=true node db/migrate-guest-auth.js",
     "auth:seed": "node db/seed-auth.js",
     "api:test": "node scripts/api-tests.js",
+    "test": "npm run db:test-triggers && npm run api:test",
     "migrate": "DB_USE_ADMIN=true node db/migrate.js",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.js\"",

@@ -63,10 +63,31 @@ router.get('/profile', async (req, res, next) => {
 router.get('/bookings', async (req, res, next) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT b.public_id, b.booking_time, b.check_in_time,
-              b.check_out_time, b.cancellation_time, b.booking_status,
-              b.payment_status, b.total_charge, b.outstanding_amount
-       FROM booking b WHERE b.guest_id = ? ORDER BY b.check_in_time DESC`,
+      `SELECT
+         b.public_id,
+         b.booking_time,
+         b.check_in_time,
+         b.check_out_time,
+         b.cancellation_time,
+         b.booking_status,
+         b.payment_status,
+         b.total_charge,
+         b.outstanding_amount,
+         b.total_tax_amount,
+         b.cancellation_fee,
+         COALESCE((SELECT SUM(p.amount) FROM payment p WHERE p.booking_id = b.booking_id), 0) AS paid_amount,
+         GROUP_CONCAT(DISTINCT br_branch.name ORDER BY br_branch.name) AS branch_names,
+         GROUP_CONCAT(DISTINCT r.room_number ORDER BY r.room_number) AS room_numbers,
+         GROUP_CONCAT(DISTINCT rt.type_name ORDER BY rt.type_name) AS room_types,
+         GROUP_CONCAT(DISTINCT r.public_id) AS room_public_ids
+       FROM booking b
+       LEFT JOIN booking_room br ON br.booking_id = b.booking_id
+       LEFT JOIN room r ON r.room_id = br.room_id
+       LEFT JOIN branch br_branch ON br_branch.branch_id = r.branch_id
+       LEFT JOIN room_type rt ON rt.room_type_id = r.room_type_id
+       WHERE b.guest_id = ?
+       GROUP BY b.booking_id
+       ORDER BY b.check_in_time DESC`,
       [req.guest.guest_id],
     );
     res.json({ data: rows });
@@ -89,40 +110,64 @@ router.post('/bookings', async (req, res, next) => {
     const roomIds = req.body.room_public_ids.map((value) => uuid(value, 'room_public_id'));
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const bookingId = await nextId(connection, 'booking', 'booking_id');
-    const publicId = randomUUID();
-    await connection.execute(
-      `INSERT INTO booking
-       (booking_id, public_id, guest_id, booking_time,
-        check_in_time, check_out_time, booking_status, payment_status)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'Booked', 'Unpaid')`,
-      [bookingId, publicId, req.guest.guest_id, checkIn, checkOut],
-    );
+
+    // Verify rooms and grab tax_id for branch
+    let taxId = null;
+    const verifiedRooms = [];
     for (const roomPublicId of roomIds) {
       const [rooms] = await connection.execute(
-        'SELECT room_id FROM room WHERE public_id = ? FOR UPDATE',
+        `SELECT r.room_id, r.branch_id, t.tax_id
+         FROM room r
+         LEFT JOIN tax_rate t ON t.branch_id = r.branch_id
+         WHERE r.public_id = ? FOR UPDATE`,
         [roomPublicId],
       );
       if (!rooms.length) throw badRequest('A requested room does not exist');
+      if (rooms[0].tax_id) taxId = rooms[0].tax_id;
+
       const [conflicts] = await connection.execute(
         `SELECT 1 FROM booking_room br JOIN booking b ON b.booking_id = br.booking_id
          WHERE br.room_id = ? AND b.booking_status IN ('Booked', 'Checked-In')
            AND b.check_in_time < ? AND b.check_out_time > ? LIMIT 1`,
         [rooms[0].room_id, checkOut, checkIn],
       );
-      if (conflicts.length) throw badRequest('A requested room is unavailable');
+      if (conflicts.length) throw badRequest('A requested room is unavailable for the selected dates');
+      verifiedRooms.push(rooms[0]);
+    }
+
+    const bookingId = await nextId(connection, 'booking', 'booking_id');
+    const publicId = randomUUID();
+    await connection.execute(
+      `INSERT INTO booking
+       (booking_id, public_id, guest_id, booking_time,
+        check_in_time, check_out_time, booking_status, payment_status, tax_id)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'Booked', 'Unpaid', ?)`,
+      [bookingId, publicId, req.guest.guest_id, checkIn, checkOut, taxId],
+    );
+
+    for (const room of verifiedRooms) {
       await connection.execute(
         'INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, NULL)',
-        [bookingId, rooms[0].room_id],
+        [bookingId, room.room_id],
       );
     }
+
+    // Immediately calculate initial bill and taxes
+    await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
+
+    const [rows] = await connection.execute(
+      `SELECT public_id, booking_status, payment_status, total_charge, outstanding_amount, total_tax_amount
+       FROM booking WHERE booking_id = ?`,
+      [bookingId],
+    );
+
     await connection.commit();
     notifyStaff({
       type: 'booking.created',
       message: 'A guest created a reservation',
       data: { public_id: publicId, guest_public_id: req.guest.public_id },
     });
-    res.status(201).json({ data: { public_id: publicId } });
+    res.status(201).json({ data: rows[0] });
   } catch (error) {
     if (connection) await connection.rollback();
     next(error);
@@ -143,7 +188,7 @@ router.post('/bookings/:publicId/cancel', async (req, res, next) => {
     }
     await connection.execute('CALL sp_cancel_booking(?)', [booking.booking_id]);
     const [rows] = await connection.execute(
-      'SELECT public_id, booking_status, cancellation_time, total_charge, payment_status FROM booking WHERE booking_id = ?',
+      'SELECT public_id, booking_status, cancellation_time, total_charge, payment_status, cancellation_fee FROM booking WHERE booking_id = ?',
       [booking.booking_id],
     );
     await connection.commit();
@@ -161,6 +206,35 @@ router.post('/bookings/:publicId/cancel', async (req, res, next) => {
   }
 });
 
+router.get('/bookings/:publicId/services', async (req, res, next) => {
+  try {
+    const publicId = uuid(req.params.publicId, 'booking_public_id');
+    const [rows] = await pool.execute(
+      `SELECT
+         su.public_id,
+         sc.public_id AS service_public_id,
+         sc.service_name,
+         sc.service_description,
+         su.usage_time,
+         su.quantity,
+         su.price_at_usage,
+         su.status,
+         r.room_number,
+         r.public_id AS room_public_id
+       FROM service_usage su
+       JOIN booking b ON b.booking_id = su.booking_id
+       JOIN service_catalogue sc ON sc.service_id = su.service_id
+       JOIN room r ON r.room_id = su.room_id
+       WHERE b.public_id = ? AND b.guest_id = ?
+       ORDER BY su.usage_time DESC`,
+      [publicId, req.guest.guest_id],
+    );
+    res.json({ data: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/bookings/:publicId/services', async (req, res, next) => {
   let connection;
   try {
@@ -171,8 +245,8 @@ router.post('/bookings/:publicId/services', async (req, res, next) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const booking = await linkedBooking(connection, req.guest.guest_id, publicId);
-    if (booking.booking_status !== 'Checked-In') {
-      throw badRequest('Service requests require a checked-in reservation');
+    if (!['Booked', 'Checked-In'].includes(booking.booking_status)) {
+      throw badRequest('Service requests require an active or booked reservation');
     }
     const [services] = await connection.execute(
       'SELECT service_id FROM service_catalogue WHERE public_id = ?',

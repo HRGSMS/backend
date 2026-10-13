@@ -235,6 +235,34 @@ const payments = [
   [5, 6, '2026-10-01 14:00:00', 'Card', 65000],
 ];
 
+const cancellationPolicies = [
+  [1, 24, 'percentage', 0.5000, 0.1800, 1],
+  [2, 72, 'first_night', 1.0000, 0.1800, 1],
+  [3, 168, 'fixed', 10000.0000, 0.1800, 0],
+];
+
+const hotelConfigs = [
+  ['hotel_name', 'SkyNest Hotels', 'Public hotel brand name'],
+  ['hotel_tagline', 'Luxury Stays & Serenity', 'Short tagline shown in header'],
+  [
+    'hotel_description',
+    'Discover tailored comfort across our Sri Lanka locations. Book with flexible half-payments and personalise your stay.',
+    'Hero description text',
+  ],
+  ['hotline_number', '0760218879', 'Public customer hotline number'],
+  ['hotline_label', '24/7 Hotel Hotline', 'Label shown on floating contact button'],
+  ['checkin_time', '14:00', 'Default check-in time (HH:MM)'],
+  ['checkout_time', '11:00', 'Default check-out time (HH:MM)'],
+  ['currency', 'LKR', 'Display currency code'],
+  ['copyright_text', 'Dedicated to comfort, elegance, and peace.', 'Footer copyright tagline'],
+];
+
+const paymentMethods = [
+  [1, 'Credit Card', 'Credit / Debit Card', 1],
+  [2, 'Online Transfer', 'Online Bank Transfer', 1],
+  [3, 'Cash Deposit', 'Direct Deposit', 1],
+];
+
 /**
  * Inserts a collection of parameterized rows into one table.
  *
@@ -270,6 +298,8 @@ export async function seedDatabase() {
     for (const table of [
       'notification_outbox',
       'cancellation_policy',
+      'hotel_config',
+      'payment_method',
       'service_usage',
       'booking_room',
       'payment',
@@ -385,6 +415,31 @@ export async function seedDatabase() {
       'payment',
       ['payment_id', 'booking_id', 'payment_date', 'payment_method', 'amount'],
       payments,
+    );
+    await insertRows(
+      connection,
+      'cancellation_policy',
+      [
+        'rule_id',
+        'minimum_notice_hours',
+        'fee_type',
+        'fee_value',
+        'tax_rate',
+        'charge_services',
+      ],
+      cancellationPolicies,
+    );
+    await insertRows(
+      connection,
+      'hotel_config',
+      ['config_key', 'config_value', 'description'],
+      hotelConfigs,
+    );
+    await insertRows(
+      connection,
+      'payment_method',
+      ['method_id', 'method_name', 'display_name', 'is_active'],
+      paymentMethods,
     );
 
     await connection.commit();
