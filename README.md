@@ -362,18 +362,23 @@ cannot create users, change roles, or list users.
 
 ## Data APIs
 
-All data APIs require an authenticated Better Auth session cookie. Frontend
-requests must use `credentials: 'include'`:
+Most data APIs require an authenticated Better Auth session cookie. However,
+the room listing and availability endpoint (`GET /api/rooms`) is publicly
+accessible without logging in, allowing guests and visitors to browse
+available rooms.
+
+For authenticated endpoints, frontend requests must use
+`credentials: 'include'`:
 
 ```js
-const response = await fetch('http://localhost:4000/api/rooms', {
+const response = await fetch('http://localhost:4000/api/branches', {
   credentials: 'include',
 });
 const result = await response.json();
 ```
 
 The backend returns successful collection responses in the form
-`{ "data": [...] }`. Unauthenticated requests receive HTTP `401`.
+`{ "data": [...] }`. Unauthenticated requests to protected endpoints receive HTTP `401`.
 
 ### Create, update, and delete records
 
@@ -565,6 +570,7 @@ GET /api/rooms
 GET /api/rooms?available_from=2026-10-20&available_to=2026-10-23
 ```
 
+Viewing rooms and checking availability does not require logging in.
 The availability query excludes rooms with an overlapping `Booked` or
 `Checked-In` booking. Dates are interpreted as an exclusive end interval.
 

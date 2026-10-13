@@ -220,6 +220,19 @@ async function runTests() {
 
   printHeader('Public and authentication endpoints');
   await test('health check', 'GET', '/api/health');
+  await test('view rooms without session', 'GET', '/api/rooms', {
+    collection: true,
+    hideIds: true,
+  });
+  await test(
+    'view room availability without session',
+    'GET',
+    '/api/rooms?available_from=2026-10-20&available_to=2026-10-23',
+    {
+      collection: true,
+      hideIds: true,
+    },
+  );
   await test('protected route without session', 'GET', '/api/branches', { status: 401 });
   await test('public sign-up disabled', 'POST', '/api/auth/sign-up/email', {
     body: {

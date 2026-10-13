@@ -26,3 +26,28 @@ export async function requireAuth(req, res, next) {
     next(error);
   }
 }
+
+/**
+ * Populates req.auth if a valid Better Auth session is present,
+ * but allows unauthenticated requests to proceed.
+ *
+ * @param {import('express').Request} req Incoming Express request.
+ * @param {import('express').Response} res Outgoing Express response.
+ * @param {import('express').NextFunction} next Express continuation callback.
+ * @returns {Promise<void>} Resolves after checking session.
+ */
+export async function optionalAuth(req, res, next) {
+  try {
+    const session = await auth.api.getSession({
+      headers: fromNodeHeaders(req.headers),
+    });
+
+    if (session) {
+      req.auth = session;
+    }
+
+    next();
+  } catch {
+    next();
+  }
+}

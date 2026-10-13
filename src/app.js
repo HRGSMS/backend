@@ -7,7 +7,7 @@ import dataRoutes from './routes/data.routes.js';
 import writeRoutes from './routes/write.routes.js';
 import guestRoutes from './routes/guest.routes.js';
 import guestAuthRoutes from './routes/guest-auth.routes.js';
-import { requireAuth } from './middleware/require-auth.middleware.js';
+import { requireAuth, optionalAuth } from './middleware/require-auth.middleware.js';
 
 export function createApp() {
   const app = express();
@@ -36,7 +36,16 @@ export function createApp() {
     res.status(200).json({ status: 'ok' });
   });
 
-  app.use('/api', requireAuth, dataRoutes);
+  app.use(
+    '/api',
+    (req, res, next) => {
+      if (req.method === 'GET' && /^\/rooms\/?$/.test(req.path)) {
+        return optionalAuth(req, res, next);
+      }
+      return requireAuth(req, res, next);
+    },
+    dataRoutes,
+  );
   app.use('/api', requireAuth, writeRoutes);
   app.use('/api/guest', requireAuth, guestRoutes);
 
