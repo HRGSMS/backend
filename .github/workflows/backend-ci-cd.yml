@@ -129,17 +129,24 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # 2. Install production dependencies
+            # 2. Stop MySQL service to free RAM for npm dependency installation
+            sudo systemctl stop mysql || sudo systemctl stop mysqld || true
+
+            # 3. Install production dependencies
             npm ci --omit=dev
 
-            # 3. Apply safe database migrations (non-destructive)
+            # 4. Restart MySQL service and wait for it to be ready
+            sudo systemctl start mysql || sudo systemctl start mysqld
+            sleep 3
+
+            # 5. Apply safe database migrations (non-destructive)
             npm run migrate
             npm run auth:migrate
 
-            # 4. Zero-downtime reload via PM2
+            # 6. Zero-downtime reload via PM2
             pm2 reload hrgsms-backend --update-env
 
-            # 5. Verify backend health
+            # 7. Verify backend health
             sleep 3
             curl -f http://127.0.0.1:4000/api/health || pm2 status hrgsms-backend
             echo "==> Backend Deployment completed successfully!"
