@@ -13,9 +13,7 @@ const logLevel = cliLogLevel || process.env.API_TEST_LOG_LEVEL || 'normal';
 const logLevelIndex = logLevelNames.indexOf(logLevel);
 
 if (logLevelIndex < 0) {
-  console.error(
-    `Invalid API_TEST_LOG_LEVEL "${logLevel}". Use quiet, normal, verbose, or debug.`,
-  );
+  console.error(`Invalid API_TEST_LOG_LEVEL "${logLevel}". Use quiet, normal, verbose, or debug.`);
   process.exitCode = 1;
 }
 
@@ -23,6 +21,7 @@ const credentials = {
   admin: ['admin@hotel.com', 'admin123'],
   manager: ['manager@hotel.com', 'manager123'],
   frontDesk: ['frontdesk@hotel.com', 'frontdesk123'],
+  guest: ['amara.perera@example.com', 'guest123'],
 };
 
 const colors = {
@@ -45,10 +44,12 @@ function shouldLog(level) {
 function formatBody(value) {
   if (value === undefined || value === null || value === '') return '(empty)';
 
-  const redacted = JSON.parse(JSON.stringify(value, (key, nestedValue) => {
-    if (/password|token|cookie|secret/i.test(key)) return '[redacted]';
-    return nestedValue;
-  }));
+  const redacted = JSON.parse(
+    JSON.stringify(value, (key, nestedValue) => {
+      if (/password|token|cookie|secret/i.test(key)) return '[redacted]';
+      return nestedValue;
+    }),
+  );
   const text = typeof redacted === 'string' ? redacted : JSON.stringify(redacted, null, 2);
   return text.length > 4000 ? `${text.slice(0, 4000)}\n... (truncated)` : text;
 }
@@ -184,7 +185,8 @@ async function test(label, method, path, options = {}) {
   } catch (error) {
     failed += 1;
     const status = error.cause?.status || 'ERR';
-    const detail = error.message === 'fetch failed' ? 'server unavailable' : `${label}: ${error.message}`;
+    const detail =
+      error.message === 'fetch failed' ? 'server unavailable' : `${label}: ${error.message}`;
     printResult(false, method, path, status, detail);
     if (shouldLog('debug')) {
       console.error(`${colors.gray}${error.stack || error}${colors.reset}`);
@@ -246,10 +248,18 @@ async function runTests() {
   const adminCookie = await signIn('admin sign-in', ...credentials.admin);
   const managerCookie = await signIn('manager sign-in', ...credentials.manager);
   const frontDeskCookie = await signIn('front-desk sign-in', ...credentials.frontDesk);
+  const guestCookie = await signIn('guest sign-in', ...credentials.guest);
 
   await test('admin session', 'GET', '/api/auth/get-session', { cookie: adminCookie });
   await test('manager session', 'GET', '/api/auth/get-session', { cookie: managerCookie });
   await test('front-desk session', 'GET', '/api/auth/get-session', { cookie: frontDeskCookie });
+  await test('guest session', 'GET', '/api/auth/get-session', { cookie: guestCookie });
+  await test('guest profile', 'GET', '/api/guest/profile', { cookie: guestCookie });
+  await test('guest bookings', 'GET', '/api/guest/bookings', {
+    cookie: guestCookie,
+    collection: true,
+    hideIds: true,
+  });
 
   printHeader('Admin-only authentication endpoints');
   await test('admin lists users', 'GET', '/api/auth/admin/list-users?limit=100', {
@@ -352,7 +362,9 @@ async function runTests() {
     },
   });
   const createdGuest = await request('GET', `/api/guests`, undefined, adminCookie);
-  const createdGuestPublicId = createdGuest.data?.data?.find((guest) => guest.email === testGuestEmail)?.public_id;
+  const createdGuestPublicId = createdGuest.data?.data?.find(
+    (guest) => guest.email === testGuestEmail,
+  )?.public_id;
   await test('admin updates guest', 'PATCH', `/api/guests/${createdGuestPublicId}`, {
     cookie: adminCookie,
     body: { phone_number: '+94771111111' },
@@ -403,32 +415,47 @@ async function runTests() {
   });
 
   printHeader('Guest service request APIs');
-  const serviceOptions = await test('service request options', 'GET', '/api/service-request-options', {
-    cookie: frontDeskCookie,
-    collection: true,
-    hideIds: true,
-  });
+  const serviceOptions = await test(
+    'service request options',
+    'GET',
+    '/api/service-request-options',
+    {
+      cookie: frontDeskCookie,
+      collection: true,
+      hideIds: true,
+    },
+  );
   const serviceOption = serviceOptions?.data?.data?.[0];
   if (serviceOption) {
-    const createdRequest = await test('front-desk creates service request', 'POST', `/api/bookings/${serviceOption.booking_public_id}/services`, {
-      cookie: frontDeskCookie,
-      status: 201,
-      body: {
-        service_public_id: servicePublicId,
-        room_public_id: serviceOption.room_public_id,
-        quantity: 1,
+    const createdRequest = await test(
+      'front-desk creates service request',
+      'POST',
+      `/api/bookings/${serviceOption.booking_public_id}/services`,
+      {
+        cookie: frontDeskCookie,
+        status: 201,
+        body: {
+          service_public_id: servicePublicId,
+          room_public_id: serviceOption.room_public_id,
+          quantity: 1,
+        },
       },
-    });
+    );
     const requestPublicId = createdRequest?.data?.data?.public_id;
     await test('staff lists service requests', 'GET', '/api/service-requests?status=Pending', {
       cookie: managerCookie,
       collection: true,
       hideIds: true,
     });
-    await test('manager completes service request', 'PATCH', `/api/service-requests/${requestPublicId}/complete`, {
-      cookie: managerCookie,
-      hideIds: true,
-    });
+    await test(
+      'manager completes service request',
+      'PATCH',
+      `/api/service-requests/${requestPublicId}/complete`,
+      {
+        cookie: managerCookie,
+        hideIds: true,
+      },
+    );
   }
 
   printHeader('Report endpoints');
@@ -436,10 +463,7 @@ async function runTests() {
     ['/api/reports/occupancy?from=2026-10-01&to=2026-10-31', 'occupancy report'],
     ['/api/reports/billing', 'billing report'],
     ['/api/reports/service-usage', 'service usage report'],
-    [
-      '/api/reports/service-usage?from=2026-10-01&to=2026-11-01',
-      'filtered service usage report',
-    ],
+    ['/api/reports/service-usage?from=2026-10-01&to=2026-11-01', 'filtered service usage report'],
     ['/api/reports/revenue?from=2026-10-01&to=2026-11-01', 'revenue report'],
     ['/api/reports/top-services', 'top services report'],
   ];

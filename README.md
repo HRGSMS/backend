@@ -136,12 +136,19 @@ Apply Better Auth's authentication tables to the configured MySQL database:
 npm run auth:migrate
 ```
 
-Create or update the three development staff accounts with Better Auth's
+Create or update development staff accounts and guest accounts with Better Auth's
 password hashing:
 
 ```bash
 npm run auth:seed
 ```
+
+Default seeded login credentials:
+
+- **Admin**: `admin@hotel.com` / `admin123`
+- **Manager**: `manager@hotel.com` / `manager123`
+- **Front Desk**: `frontdesk@hotel.com` / `frontdesk123`
+- **Guests**: Any seeded guest email (e.g. `amara.perera@example.com`, `nimal.fernando@example.com`, `kavya.silva@example.com`, `dilan.j@example.com`, `maya.w@example.com`, `oliver.thompson@example.com`, `sophie.chen@example.com`) / password: `guest123`
 
 Testing Current implemented triggers
 
