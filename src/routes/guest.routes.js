@@ -149,7 +149,8 @@ router.post('/bookings', async (req, res, next) => {
            AND b.check_in_time < ? AND b.check_out_time > ? LIMIT 1`,
         [room.room_id, checkOut, checkIn],
       );
-      if (conflicts.length) throw badRequest('A requested room is unavailable for the selected dates');
+      if (conflicts.length)
+        throw badRequest('A requested room is unavailable for the selected dates');
       await connection.execute(
         'INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, NULL)',
         [bookingId, room.room_id],

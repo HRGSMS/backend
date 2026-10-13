@@ -33,11 +33,7 @@ export function createApp() {
   });
 
   // Public read routes used by the guest-facing portal (no auth required)
-  const PUBLIC_GET_PATHS = [
-    /^\/rooms\/?$/,
-    /^\/hotel-config\/?$/,
-    /^\/payment-methods\/?$/,
-  ];
+  const PUBLIC_GET_PATHS = [/^\/rooms\/?$/, /^\/hotel-config\/?$/, /^\/payment-methods\/?$/];
 
   app.use(
     '/api',

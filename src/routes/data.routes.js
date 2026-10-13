@@ -184,9 +184,7 @@ router.get('/rooms', async (req, res, next) => {
  */
 router.get('/hotel-config', async (req, res, next) => {
   try {
-    const [rows] = await pool.execute(
-      'SELECT config_key, config_value FROM hotel_config',
-    );
+    const [rows] = await pool.execute('SELECT config_key, config_value FROM hotel_config');
     // Convert rows to a flat key→value object for easy frontend consumption
     const config = Object.fromEntries(rows.map((r) => [r.config_key, r.config_value]));
     res.json({ data: config });
