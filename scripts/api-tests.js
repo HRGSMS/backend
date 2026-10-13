@@ -245,6 +245,26 @@ async function runTests() {
     status: 400,
   });
 
+  await test('forgot password invalid email rejected', 'POST', '/api/auth/forgot-password', {
+    body: { email: 'nonexistent@nowhere.com' },
+    status: 404,
+  });
+  const forgotRes = await test(
+    'forgot password generates token for registered user',
+    'POST',
+    '/api/auth/forgot-password',
+    {
+      body: { email: credentials.guest[0] },
+      status: 200,
+    },
+  );
+  if (forgotRes?.data?.data?.token) {
+    await test('reset password updates user password', 'POST', '/api/auth/reset-password-direct', {
+      body: { token: forgotRes.data.data.token, newPassword: credentials.guest[1] },
+      status: 200,
+    });
+  }
+
   const adminCookie = await signIn('admin sign-in', ...credentials.admin);
   const managerCookie = await signIn('manager sign-in', ...credentials.manager);
   const frontDeskCookie = await signIn('front-desk sign-in', ...credentials.frontDesk);

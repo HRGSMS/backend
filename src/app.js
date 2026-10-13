@@ -7,6 +7,7 @@ import dataRoutes from './routes/data.routes.js';
 import writeRoutes from './routes/write.routes.js';
 import guestRoutes from './routes/guest.routes.js';
 import guestAuthRoutes from './routes/guest-auth.routes.js';
+import authRecoveryRoutes from './routes/auth-recovery.routes.js';
 import { requireAuth, optionalAuth } from './middleware/require-auth.middleware.js';
 
 export function createApp() {
@@ -33,6 +34,7 @@ export function createApp() {
   app.use(corsMiddleware);
 
   app.use('/api/auth/guest-sign-up', express.json(), guestAuthRoutes);
+  app.use('/api/auth', express.json(), authRecoveryRoutes);
 
   // Better Auth must receive the raw request body before JSON parsing.
   app.all('/api/auth/*splat', toNodeHandler(auth));
