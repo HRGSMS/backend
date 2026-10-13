@@ -319,7 +319,42 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const guestId = await getGuestId(connection, guestPublicId);
-    const taxId = await getTaxId(connection, req.body?.tax_public_id);
+    let taxId = await getTaxId(connection, req.body?.tax_public_id);
+
+    const roomRecords = [];
+    for (const roomPublicId of req.body.room_public_ids) {
+      const [rooms] = await connection.execute(
+        'SELECT room_id, branch_id FROM room WHERE public_id = ? FOR UPDATE',
+        [roomPublicId],
+      );
+      if (!rooms.length) throw validationError(`Room ${roomPublicId} does not exist`);
+      roomRecords.push({ ...rooms[0], public_id: roomPublicId });
+    }
+
+    const branchIds = new Set(roomRecords.map((r) => r.branch_id));
+    if (branchIds.size > 1) {
+      throw validationError('All rooms in a booking must belong to the same hotel branch');
+    }
+
+    const bookingBranchId = roomRecords[0].branch_id;
+    if (taxId) {
+      const [taxRows] = await connection.execute(
+        'SELECT branch_id FROM tax_rate WHERE tax_id = ?',
+        [taxId],
+      );
+      if (taxRows.length && taxRows[0].branch_id !== bookingBranchId) {
+        throw validationError(
+          'Selected tax rate does not match the hotel branch of the booked rooms',
+        );
+      }
+    } else {
+      const [branchTax] = await connection.execute(
+        'SELECT tax_id FROM tax_rate WHERE branch_id = ? LIMIT 1',
+        [bookingBranchId],
+      );
+      if (branchTax.length) taxId = branchTax[0].tax_id;
+    }
+
     const bookingId = await nextId(connection, 'booking', 'booking_id');
     const publicId = randomUUID();
     await connection.execute(
@@ -329,26 +364,23 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'Unpaid', ?)`,
       [bookingId, publicId, guestId, checkIn, checkOut, status, taxId],
     );
-    for (const roomPublicId of req.body.room_public_ids) {
-      const [rooms] = await connection.execute(
-        'SELECT room_id FROM room WHERE public_id = ? FOR UPDATE',
-        [roomPublicId],
-      );
-      if (!rooms.length) throw validationError(`Room ${roomPublicId} does not exist`);
+    for (const room of roomRecords) {
       const [conflicts] = await connection.execute(
         `SELECT 1 FROM booking_room br JOIN booking b ON b.booking_id = br.booking_id
          WHERE br.room_id = ? AND b.booking_status IN ('Booked', 'Checked-In')
          AND b.check_in_time < ? AND b.check_out_time > ? LIMIT 1`,
-        [rooms[0].room_id, checkOut, checkIn],
+        [room.room_id, checkOut, checkIn],
       );
       if (conflicts.length) {
-        const error = new Error(`Room ${roomPublicId} is already booked for the requested period`);
+        const error = new Error(
+          `Room ${room.public_id} is already booked for the requested period`,
+        );
         error.statusCode = 409;
         throw error;
       }
       await connection.execute(
         'INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, NULL)',
-        [bookingId, rooms[0].room_id],
+        [bookingId, room.room_id],
       );
     }
     await connection.commit();
@@ -365,12 +397,16 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
     if (
       error.statusCode ||
       error.code === 'ER_DUP_ENTRY' ||
-      error.code === 'ER_NO_REFERENCED_ROW_2'
+      error.code === 'ER_NO_REFERENCED_ROW_2' ||
+      error.code === 'ER_SIGNAL_EXCEPTION' ||
+      error.sqlState === '45000'
     ) {
       if (error.code === 'ER_DUP_ENTRY')
         res.status(409).json({ error: 'Booking conflicts with an existing record' });
       else if (error.code === 'ER_NO_REFERENCED_ROW_2')
         res.status(400).json({ error: 'A referenced record does not exist' });
+      else if (error.code === 'ER_SIGNAL_EXCEPTION' || error.sqlState === '45000')
+        res.status(400).json({ error: error.sqlMessage || error.message });
       else res.status(error.statusCode).json({ error: error.message });
       return;
     }

@@ -328,6 +328,62 @@ async function testTriggerValidation() {
       logTest('room: status synchronized on check-in and check-out', false, `Error: ${e.message}`);
     }
 
+    // Test 16: Multi-room booking across different branches rejected
+    try {
+      await connection.execute(
+        `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id)
+         VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 1)`,
+        [993, 1, '2026-11-20 14:00:00', '2026-11-25 11:00:00'],
+      );
+      await connection.execute(
+        `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, 0)`,
+        [993, 101], // Colombo (Branch 1)
+      );
+      await connection.execute(
+        `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, 0)`,
+        [993, 201], // Kandy (Branch 2) - should fail
+      );
+      logTest('booking_room: multi-branch rooms rejected', false, 'Should have thrown error');
+    } catch (e) {
+      logTest('booking_room: multi-branch rooms rejected', true, `Error: ${e.message}`);
+    }
+
+    // Test 17: Booking room with mismatched tax_id branch rejected
+    try {
+      await connection.execute(
+        `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id)
+         VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 2)`, // Tax ID 2 is Kandy
+        [992, 1, '2026-11-26 14:00:00', '2026-11-28 11:00:00'],
+      );
+      await connection.execute(
+        `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, 0)`,
+        [992, 101], // Colombo (Branch 1) - should fail because tax_id is Kandy (Branch 2)
+      );
+      logTest('booking_room: room branch mismatch with tax_id rejected', false, 'Should have thrown error');
+    } catch (e) {
+      logTest('booking_room: room branch mismatch with tax_id rejected', true, `Error: ${e.message}`);
+    }
+
+    // Test 18: Booking tax_id update mismatching existing rooms rejected
+    try {
+      await connection.execute(
+        `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id)
+         VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 1)`, // Tax ID 1 is Colombo
+        [991, 1, '2026-11-29 14:00:00', '2026-11-30 11:00:00'],
+      );
+      await connection.execute(
+        `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, 0)`,
+        [991, 101], // Colombo (Branch 1)
+      );
+      // Attempt to change tax_id to Kandy (tax_id 2)
+      await connection.execute(
+        `UPDATE booking SET tax_id = 2 WHERE booking_id = 991`,
+      );
+      logTest('booking: updating tax_id to different branch rejected', false, 'Should have thrown error');
+    } catch (e) {
+      logTest('booking: updating tax_id to different branch rejected', true, `Error: ${e.message}`);
+    }
+
     await connection.rollback(); // Rollback all test inserts
   } catch (e) {
     console.error(`${colors.red}Transaction error: ${e.message}${colors.reset}`);
@@ -438,7 +494,7 @@ async function testCalculateBill() {
       await connection.execute(
         `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id, tax_rate_at_booking)
          VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 1, 0.18)`,
-        [9003, 3, '2026-10-10 14:00:00', '2026-10-12 11:00:00'],
+        [9003, 3, '2026-11-10 14:00:00', '2026-11-12 11:00:00'],
       );
       await connection.execute(
         `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, ?)`,
@@ -472,7 +528,7 @@ async function testCalculateBill() {
       await connection.execute(
         `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id, tax_rate_at_booking)
          VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 1, 0.18)`,
-        [9004, 4, '2026-10-10 14:00:00', '2026-10-12 11:00:00'],
+        [9004, 4, '2026-12-10 14:00:00', '2026-12-12 11:00:00'],
       );
       await connection.execute(
         `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, ?)`,

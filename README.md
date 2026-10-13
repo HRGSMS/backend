@@ -1,68 +1,101 @@
-# backend
+# SkyNest Hotels HRGSMS — Backend
 
-The Backend Repository for HRGMS
+The backend REST API and database engine for the **Hotel Reservation and Guest Services Management System (HRGSMS)** of SkyNest Hotels (operating in Colombo, Kandy, and Galle, Sri Lanka).
 
-## Local MySQL connection
+Built with **Node.js**, **Express**, **MySQL 8.0**, **Better Auth**, and **Socket.io**.
 
-Install MySQL locally, create a database, and add a `.env` file in the project root:
+---
+
+## Table of Contents
+
+1. [Features & Tech Stack](#features--tech-stack)
+2. [Prerequisites](#prerequisites)
+3. [Environment Configuration](#environment-configuration)
+4. [Database Setup & Management](#database-setup--management)
+   - [MySQL Users & Permissions](#mysql-users--permissions)
+   - [Step 1: Initialize Database Schema](#step-1-initialize-database-schema)
+   - [Step 2: Migrate Authentication Tables](#step-2-migrate-authentication-tables)
+   - [Step 3: Seed Hotel Data](#step-3-seed-hotel-data)
+   - [Step 4: Seed User Credentials](#step-4-seed-user-credentials)
+   - [Database Teardown & Quick Rebuild](#database-teardown--quick-rebuild)
+5. [Database Automation & ACID Rules](#database-automation--acid-rules)
+   - [Triggers & Integrity Rules](#triggers--integrity-rules)
+   - [Stored Procedures](#stored-procedures)
+   - [Testing Triggers & Procedures](#testing-triggers--procedures)
+6. [Running the Application](#running-the-application)
+   - [Health Check](#health-check)
+7. [API Reference](#api-reference)
+   - [API Conventions & Security](#api-conventions--security)
+   - [Authentication & User Management (`/api/auth`)](#authentication--user-management-apiauth)
+   - [Public Room Catalog & Availability (`/api/rooms`)](#public-room-catalog--availability-apirooms)
+   - [Reference Data APIs](#reference-data-apis)
+   - [Hotel Operations & Bookings (`/api/bookings`)](#hotel-operations--bookings-apibookings)
+   - [Billing & Payments](#billing--payments)
+   - [Cancellation Management](#cancellation-management)
+   - [Service Catalogue & Requests](#service-catalogue--requests)
+   - [Guest Self-Service Portal (`/api/guest`)](#guest-self-service-portal-apiguest)
+   - [Management & Analytical Reports (`/api/reports`)](#management--analytical-reports-apireports)
+8. [Real-Time Staff Notifications (WebSockets)](#real-time-staff-notifications-websockets)
+9. [Testing & Quality Assurance](#testing--quality-assurance)
+
+---
+
+## Features & Tech Stack
+
+- **Relational Consistency**: 3NF/BCNF design with strict foreign keys, composite constraints, and immutable historical price snapshots.
+- **ACID Database Automation**: MySQL stored procedures (`sp_calculate_bill`, `sp_cancel_booking`) and triggers ensuring automated room status synchronization, double-booking prevention, single-branch reservation enforcement, and checkout dues verification.
+- **Session-Based Authentication**: Built with Better Auth supporting role-based access control (`admin`, `manager`, `front_desk`, and `guest`) via secure HTTP-only cookies.
+- **Analytical Reporting**: Pre-aggregated database views for room occupancy, guest billing summaries, service breakdown, monthly branch revenues, and top services.
+- **Real-Time Staff Dispatch**: Socket.io event emitter broadcasting room updates, service requests, and payment transactions to connected staff clients.
+
+---
+
+## Prerequisites
+
+- **Node.js**: `v18.x` or higher
+- **MySQL Server**: `v8.0` or higher
+- **npm**: `v9.x` or higher
+
+---
+
+## Environment Configuration
+
+Create a `.env` file in the `backend/` directory:
 
 ```env
+# Application Runtime Server
+PORT=4000
+FRONTEND_URL=http://localhost:5173
+
+# Database Connection (Restricted Runtime Account)
 DB_HOST=localhost
 DB_PORT=3306
-# Restricted application account; do not use root for the running backend.
+DB_NAME=hrgsms
 DB_USER=hrgsms_app
 DB_PASSWORD=your_runtime_password
-DB_NAME=hrgsms
-PORT=4000
+
+# Database Migration & Teardown Account (Optional / Admin)
+DB_ADMIN_USER=hrgsms_migrator
+DB_ADMIN_PASSWORD=your_migration_password
+
+# Better Auth Configuration
 BETTER_AUTH_URL=http://localhost:4000
 BETTER_AUTH_SECRET=your_generated_32_character_or_longer_secret
-FRONTEND_URL=http://localhost:5173
 ```
 
-The server checks the MySQL connection before listening:
+---
 
-```bash
-npm install
-npm start
-```
+## Database Setup & Management
 
-Initialize the database tables after creating the database configured in `.env`:
+### MySQL Users & Permissions
 
-```bash
-npm run db:init
-```
+Following security best practices, separation of privileges is maintained between the application runtime and database administration/migrations.
 
-`db:init` creates the complete schema and database views for a fresh database.
-It does not backfill UUIDs, insert seed data, or modify rows in an existing
-database. Use `npm run db:recreate` when the database must be rebuilt from
-scratch.
-
-The guest-service request status column is part of the initial schema. If an
-existing database was created before guest-service requests were added, run
-`npm run db:recreate` before using those endpoints; `db:init` intentionally
-does not alter existing tables.
-
-The initializer is safe to run more than once because it uses
-`CREATE TABLE IF NOT EXISTS`. It creates the tables in foreign-key dependency
-order.
-
-### MySQL users and permissions
-
-Use separate MySQL accounts for database setup and application runtime. The
-backend should use a restricted runtime account. It needs only:
-
-- `SELECT` for API reads and report views
-- `INSERT`, `UPDATE`, and `DELETE` for application writes
-- `EXECUTE` for the billing and cancellation procedures
-
-It does not need `CREATE`, `ALTER`, `DROP`, `INDEX`, `REFERENCES`, `TRIGGER`,
-`CREATE ROUTINE`, `ALTER ROUTINE`, or `SUPER`.
-
-Create the runtime account as a MySQL administrator:
+#### 1. Runtime Account (`hrgsms_app`)
+The running backend requires only data manipulation and procedure execution permissions. It does **not** need schema modification privileges:
 
 ```sql
-CREATE USER 'hrgsms_app'@'localhost'
-  IDENTIFIED BY 'strong-runtime-password';
+CREATE USER 'hrgsms_app'@'localhost' IDENTIFIED BY 'your_runtime_password';
 
 GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE
   ON hrgsms.* TO 'hrgsms_app'@'localhost';
@@ -70,388 +103,379 @@ GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE
 FLUSH PRIVILEGES;
 ```
 
-Use this account in `DB_USER` and `DB_PASSWORD` for the running backend.
-
-Database destruction and recreation use the migration account through
-`DB_ADMIN_USER` and `DB_ADMIN_PASSWORD`. That account must also have global
-permission to drop and create databases; grants only on `hrgsms.*` are not
-sufficient because the database is dropped before it is created again.
-
-Run schema creation, database recreation, Better Auth migration, and seeding
-with a separate migration/administrator account. Do not grant those
-schema-changing permissions to `hrgsms_app`:
+#### 2. Migration & Administration Account (`hrgsms_migrator`)
+Used for database initialization, schema changes, database recreation, and trigger definitions:
 
 ```sql
-CREATE USER 'hrgsms_migrator'@'localhost'
-  IDENTIFIED BY 'strong-migration-password';
+CREATE USER 'hrgsms_migrator'@'localhost' IDENTIFIED BY 'your_migration_password';
 
-GRANT ALL PRIVILEGES
-  ON hrgsms.* TO 'hrgsms_migrator'@'localhost';
+GRANT ALL PRIVILEGES ON hrgsms.* TO 'hrgsms_migrator'@'localhost';
 
-# Required because this same account runs db:destroy and db:recreate.
+-- Required for db:destroy and db:recreate (dropping and recreating the database):
 GRANT CREATE, DROP ON *.* TO 'hrgsms_migrator'@'localhost';
 
 FLUSH PRIVILEGES;
 ```
 
-The database tooling sets `DB_USE_ADMIN=true` automatically for schema
-creation, database recreation, trigger tests, and Better Auth migrations.
-Those commands use `DB_ADMIN_USER` and `DB_ADMIN_PASSWORD`. Hotel data seeding
-and authentication account seeding use the normal `DB_USER` and
-`DB_PASSWORD` credentials because they only modify rows. Keep
-`DB_USER=hrgsms_app` for the running backend.
+> **Note on Binary Logging**: If MySQL binary logging is enabled, creating stored routines or triggers may require `SUPER` privileges or the `log_bin_trust_function_creators` variable set:
+> ```sql
+> SET PERSIST log_bin_trust_function_creators = 1;
+> ```
 
-If binary logging is enabled, MySQL may still reject stored procedure and
-trigger definitions for the migration account with a `SUPER` privilege error.
-The safest option is to run those schema commands as a controlled DBA/root
-deployment step while keeping `log_bin_trust_function_creators` disabled.
-For a trusted local development database only, an administrator may instead
-enable trusted routine creators:
+---
 
-```sql
-SET GLOBAL log_bin_trust_function_creators = 1;
+### Step 1: Initialize Database Schema
+
+Create the database tables, views, stored procedures, and triggers:
+
+```bash
+npm run db:init
 ```
 
-`SET GLOBAL` applies immediately but is temporary. `SET PERSIST` survives
-restarts:
+`db:init` runs in dependency order using `CREATE TABLE IF NOT EXISTS` and installs all triggers and stored procedures via `db/triggers.js`.
 
-```sql
-SET PERSIST log_bin_trust_function_creators = 1;
-```
+---
 
-Verify it with:
+### Step 2: Migrate Authentication Tables
 
-```sql
-SHOW GLOBAL VARIABLES LIKE 'log_bin_trust_function_creators';
-```
-
-This is convenient for local development but less safe than using a
-controlled migration account/DBA step. Do not enable it broadly in production
-or replicated environments without reviewing the MySQL binary-logging and
-replication policy.
-
-Apply Better Auth's authentication tables to the configured MySQL database:
+Run Better Auth migrations to generate auth tables and add the guest profile linkage:
 
 ```bash
 npm run auth:migrate
 ```
 
-Create or update development staff accounts and guest accounts with Better Auth's
-password hashing:
+---
+
+### Step 3: Seed Hotel Data
+
+You can choose between the **Standard Rubric Seed** or the **Comprehensive Edge-Case Seed**.
+
+#### Option A: Standard Rubric Dataset (Minimal)
+Populates the baseline assignment dataset (3 branches, 12 rooms, 6 services, 5 guests, 8 bookings, and payments):
+
+```bash
+npm run db:seed
+```
+
+#### Option B: Comprehensive Edge-Case Dataset (Recommended for Full Testing)
+Populates an extensive operational dataset (3 branches, 25 rooms, 8 services, 14 guests, 20 bookings) modeling all hotel operational edge cases:
+
+```bash
+npm run db:seed:comprehensive
+```
+
+**Edge cases modeled in the comprehensive dataset:**
+- **Multi-room reservations**: Bookings spanning multiple rooms with per-room service usage.
+- **Single-branch enforcement**: Validating all multi-room bookings stay strictly within the same property.
+- **Same-day room turnover**: Checkout at 11:00 AM and next guest check-in at 14:00 PM for the same room.
+- **Full lifecycle coverage**: `Booked`, `Checked-In`, `Checked-Out`, and `Cancelled`.
+- **Payment & billing diversity**: `Paid`, `Partially Paid` (deposits), `Unpaid`, and `Credit Due` (overpayment/refund balances).
+- **Payment methods**: Cash, Card, Bank Transfer, and split-payment transactions.
+- **Service request lifecycle**: Zero-service stays, VIP high-volume consumption (5+ services), and `Pending` vs `Completed` requests.
+- **Cancellation policy tiers**: >72h free cancellation, 24-71h first-night penalty, and <24h late penalty with services charged.
+- **Guest diversity**: Domestic travelers, international tourists, corporate accounts, and newly registered guests with 0 bookings.
+
+---
+
+### Step 4: Seed User Credentials
+
+Provisions development credentials for staff and all seeded guests:
 
 ```bash
 npm run auth:seed
 ```
 
-Default seeded login credentials:
+#### Default Seeded Credentials
 
-- **Admin**: `admin@hotel.com` / `admin123`
-- **Manager**: `manager@hotel.com` / `manager123`
-- **Front Desk**: `frontdesk@hotel.com` / `frontdesk123`
-- **Guests**: Any seeded guest email (e.g. `amara.perera@example.com`, `nimal.fernando@example.com`, `kavya.silva@example.com`, `dilan.j@example.com`, `maya.w@example.com`, `oliver.thompson@example.com`, `sophie.chen@example.com`) / password: `guest123`
+| Role | Email | Password |
+| :--- | :--- | :--- |
+| **Admin** | `admin@hotel.com` | `admin123` |
+| **Manager** | `manager@hotel.com` | `manager123` |
+| **Front Desk** | `frontdesk@hotel.com` | `frontdesk123` |
+| **Guests** | Any seeded guest email (e.g. `amara.perera@example.com`) | `guest123` |
 
-Testing Current implemented triggers
+---
+
+### Database Teardown & Quick Rebuild
+
+To completely drop the database:
+
+```bash
+npm run db:destroy
+```
+
+To wipe and rebuild everything in a single command (drop, recreate, init, migrate auth, seed data, and seed users):
+
+```bash
+# Rebuild with Standard Seed:
+npm run db:recreate
+
+# Rebuild with Comprehensive Seed (Recommended):
+npm run db:recreate:comprehensive
+```
+
+---
+
+## Database Automation & ACID Rules
+
+All business rules are enforced directly inside MySQL to preserve ACID guarantees regardless of which application client touches the database.
+
+### Triggers & Integrity Rules
+
+| Trigger | Table | Event | Rule Enforced |
+| :--- | :--- | :--- | :--- |
+| `booking_validate` | `booking` | `BEFORE INSERT, UPDATE` | Validates dates (`check_out > check_in`), allowed status values, and tax rate bounds [0, 1]. |
+| `booking_checkout_dues` | `booking` | `BEFORE UPDATE` | Blocks `booking_status = 'Checked-Out'` if `outstanding_amount > 0`. |
+| `booking_branch_tax_validate` | `booking` | `BEFORE UPDATE` | Prevents changing a booking's `tax_id` to a branch that does not match the rooms already booked. |
+| `booking_room_price` | `booking_room` | `BEFORE INSERT, UPDATE` | **1. Single-Branch Enforcement**: Blocks adding rooms from different branches to the same booking.<br>**2. Tax Consistency**: Ensures room branch matches the booking's `tax_id` branch.<br>**3. Double-Booking Prevention**: Rejects overlapping bookings for the same room.<br>**4. Snapshot Pricing**: Auto-populates `nightly_rate_at_booking` and total room stay price. |
+| `booking_room_status_after_*` | `booking`, `booking_room` | `AFTER INSERT, UPDATE` | Automatically synchronizes `room.current_status` (Occupied = 1) on `Checked-In`, and resets to Available (0) on `Checked-Out` or `Cancelled`. |
+| `service_usage_validate` | `service_usage` | `BEFORE INSERT, UPDATE` | Enforces positive quantity, snapshots service price and tax rate, and verifies the room belongs to the booking. |
+| `payment_validate` | `payment` | `BEFORE INSERT, UPDATE` | Enforces positive payment amount. |
+| `room_type_price`, `service_catalogue_price` | `room_type`, `service_catalogue` | `BEFORE INSERT, UPDATE` | Audits price updates and automatically updates `rate_update_time` and `price_update_time`. |
+
+### Stored Procedures
+
+- **`CALL sp_calculate_bill(p_booking_id INT)`**:
+  Calculates room charges (`nightly_rate * nights`), service charges (`quantity * price`), and applicable taxes. Updates `total_charge`, `total_tax_amount`, `outstanding_amount`, `credit_amount`, and sets `payment_status` (`Paid`, `Partially Paid`, `Credit Due`, or `Unpaid`).
+- **`CALL sp_cancel_booking(p_booking_id INT)`**:
+  Applies the tiered cancellation policy based on notice period hours (`TIMESTAMPDIFF`), computes cancellation fees and taxes, updates booking status to `Cancelled`, and recalculates final bill balances.
+
+### Testing Triggers & Procedures
+
+Run the automated trigger test suite to verify all database constraints and procedures:
 
 ```bash
 npm run db:test-triggers
 ```
 
-Authentication endpoints are available under `/api/auth`. The configured
-Better Auth admin plugin disables public sign-up and allows only users with
-the `admin` role to create users or change roles.
+---
 
-## Authentication API
+## Running the Application
 
-The frontend should use the backend base URL:
-
-```text
-http://localhost:4000/api/auth
+### Development Mode (with Nodemon)
+```bash
+npm run dev
 ```
 
-Better Auth stores the session in an HTTP cookie. Always send credentials from
-the frontend so the cookie is stored and sent with subsequent requests:
-
-```js
-const authRequestOptions = {
-  credentials: 'include',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-};
+### Production Mode
+```bash
+npm start
 ```
 
-### Sign in
+### Health Check
+Verify the server is up and responding:
 
+```http
+GET http://localhost:4000/api/health
+```
+
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+## API Reference
+
+### API Conventions & Security
+
+- **UUID Public Identifiers**: Database auto-increment primary keys are never exposed in API responses or accepted in request bodies. All resources use opaque `public_id` UUIDs.
+- **Session Cookies**: All protected routes require an active Better Auth session. When calling from frontends, always set credentials:
+  ```js
+  fetch('/api/...', { credentials: 'include' });
+  ```
+- **Standard Response Shape**: Successful collection responses are wrapped in `{ "data": [...] }`.
+
+---
+
+### Authentication & User Management (`/api/auth`)
+
+#### 1. Sign In
 ```http
 POST /api/auth/sign-in/email
-```
-
-```js
-const response = await fetch('http://localhost:4000/api/auth/sign-in/email', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    email: 'admin@hotel.com',
-    password: 'admin123',
-    rememberMe: true,
-  }),
-});
-
-const result = await response.json();
-```
-
-The response contains the authenticated user and session information. Store
-the cookie through the browser; do not store the password or session token in
-local storage.
-
-### Calculate - Bill
-
-```
-POST http://localhost:4000/api/calculate-bill
-```
-
-Content-Type: application/json
-
-```
-Body(Whule logged in):
-{
-  "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
-}
-```
-
-### Cancel booking
-
-Requires a logged-in session. Replace the UUID with an existing
-`booking_public_id`.
-
-```http
-POST http://localhost:4000/api/cancel-booking
 Content-Type: application/json
 
 {
-  "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
+  "email": "admin@hotel.com",
+  "password": "admin123",
+  "rememberMe": true
 }
 ```
 
-Cancels a `Booked` reservation using the configured cancellation policy and
-recalculates its bill. The response includes cancellation fees, taxes, and
-updated billing values under `data`.
-
-- `400`: Invalid or missing booking UUID.
-- `401`: Authentication required.
-- `404`: Booking not found.
-- `409`: Booking cannot be cancelled or no matching cancellation policy exists.
-
-### Get the current session
-
+#### 2. Get Current Session
 ```http
 GET /api/auth/get-session
 ```
+Returns authenticated user details and active role.
 
-```js
-const response = await fetch('http://localhost:4000/api/auth/get-session', {
-  credentials: 'include',
-});
-
-const session = await response.json();
-```
-
-Use this endpoint when the frontend loads to determine whether the user is
-authenticated. A missing or expired session returns an unauthenticated
-response.
-
-### Sign out
-
+#### 3. Sign Out
 ```http
 POST /api/auth/sign-out
 ```
 
-```js
-await fetch('http://localhost:4000/api/auth/sign-out', {
-  ...authRequestOptions,
-  method: 'POST',
-});
-```
-
-### Guest sign-up
-
-Guests can create their own account and hotel guest profile:
-
+#### 4. Guest Self-Registration
+Guests can register their own account and hotel guest profile:
 ```http
 POST /api/auth/guest-sign-up
+Content-Type: application/json
+
+{
+  "first_name": "Amina",
+  "last_name": "Perera",
+  "email": "amina@example.com",
+  "phone_number": "+94771234567",
+  "password": "a-secure-password"
+}
 ```
 
-```js
-await fetch('http://localhost:4000/api/auth/guest-sign-up', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    first_name: 'Amina',
-    last_name: 'Perera',
-    email: 'amina@example.com',
-    phone_number: '+94771234567',
-    password: 'a-secure-password',
-  }),
-});
-```
+#### 5. Staff Administration (Admin Only)
+- **Create Staff User**: `POST /api/auth/admin/create-user` (Roles: `admin`, `manager`, `front_desk`)
+- **Change User Role**: `POST /api/auth/admin/set-role`
+- **List All Users**: `GET /api/auth/admin/list-users?limit=100`
 
-The endpoint creates the Better Auth account, creates the corresponding
-`guest` row, assigns role `guest`, and links the account to the guest row.
-Profile fields remain in the `guest` table; only the link is stored on the
-Better Auth user. The frontend should sign in after successful registration
-using `POST /api/auth/sign-in/email` with the submitted email and password.
-The lower-level Better Auth `POST /api/auth/sign-up/email` endpoint remains
-disabled.
+---
 
-### Admin: create a user
+### Public Room Catalog & Availability (`/api/rooms`)
 
-Only a user with the `admin` role may call this endpoint:
+Publicly accessible without logging in.
 
 ```http
-POST /api/auth/admin/create-user
+GET /api/rooms
+GET /api/rooms?available_from=2026-10-20&available_to=2026-10-23
 ```
+Filters out rooms with overlapping `Booked` or `Checked-In` reservations.
 
-```js
-const response = await fetch('http://localhost:4000/api/auth/admin/create-user', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    name: 'New Employee',
-    email: 'employee@hotel.com',
-    password: 'a-secure-password',
-    role: 'manager',
-  }),
-});
+---
 
-const createdUser = await response.json();
-```
+### Reference Data APIs
 
-Supported application roles are `admin`, `manager`, `front_desk`, and `guest`.
-
-### Admin: change a user's role
-
-Only an admin may change roles:
+Available to authenticated staff:
 
 ```http
-POST /api/auth/admin/set-role
+GET /api/branches
+GET /api/room-types
+GET /api/amenities
+GET /api/services
+GET /api/guests?limit=20&offset=0
 ```
 
-```js
-await fetch('http://localhost:4000/api/auth/admin/set-role', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    userId: 'USER_ID_FROM_CREATE_USER_OR_LIST_USERS',
-    role: 'front_desk',
-  }),
-});
+---
+
+### Hotel Operations & Bookings (`/api/bookings`)
+
+#### 1. Create a Booking (Staff)
+```http
+POST /api/bookings
+Content-Type: application/json
+
+{
+  "guest_public_id": "UUID_FROM_GUESTS_RESPONSE",
+  "room_public_ids": ["UUID_ROOM_1", "UUID_ROOM_2"],
+  "check_in_time": "2026-11-10T14:00:00",
+  "check_out_time": "2026-11-13T11:00:00",
+  "booking_status": "Booked"
+}
+```
+*Validation:* Rejects requests if rooms belong to different branches, or if any room is already booked for overlapping dates.
+
+#### 2. List Bookings
+```http
+GET /api/bookings
+GET /api/bookings?status=Checked-In
 ```
 
-### Admin: list users
+#### 3. Update Booking Status & Dates
+```http
+PATCH /api/bookings/:publicId
+Content-Type: application/json
 
-Only an admin may list accounts:
+{
+  "booking_status": "Checked-Out"
+}
+```
+*Validation:* Checking out with outstanding dues (`outstanding_amount > 0`) is blocked by both the route handler and database triggers.
+
+---
+
+### Billing & Payments
+
+#### 1. Calculate / Refresh Bill
+Manually trigger bill recalculation via `sp_calculate_bill`:
+```http
+POST /api/calculate-bill
+Content-Type: application/json
+
+{
+  "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
+}
+```
+
+#### 2. Record a Payment
+```http
+POST /api/bookings/:publicId/payments
+Content-Type: application/json
+
+{
+  "payment_method": "Card",
+  "amount": 25000
+}
+```
+Automatically invokes `sp_calculate_bill` and updates outstanding balance and payment status.
+
+---
+
+### Cancellation Management
 
 ```http
-GET /api/auth/admin/list-users
+POST /api/cancel-booking
+Content-Type: application/json
+
+{
+  "booking_public_id": "UUID_FROM_BOOKINGS_RESPONSE"
+}
 ```
+Invokes `sp_cancel_booking`, evaluates policy notice tiers, records cancellation fees, and updates room availability.
 
-```js
-const response = await fetch('http://localhost:4000/api/auth/admin/list-users?limit=100', {
-  credentials: 'include',
-});
+---
 
-const users = await response.json();
-```
+### Service Catalogue & Requests
 
-Admin requests made without a valid admin session return an authorization
-error. Managers and front-desk users can sign in and access their session, but
-cannot create users, change roles, or list users.
-
-## Data APIs
-
-Most data APIs require an authenticated Better Auth session cookie. However,
-the room listing and availability endpoint (`GET /api/rooms`) is publicly
-accessible without logging in, allowing guests and visitors to browse
-available rooms.
-
-For authenticated endpoints, frontend requests must use
-`credentials: 'include'`:
-
-```js
-const response = await fetch('http://localhost:4000/api/branches', {
-  credentials: 'include',
-});
-const result = await response.json();
-```
-
-The backend returns successful collection responses in the form
-`{ "data": [...] }`. Unauthenticated requests to protected endpoints receive HTTP `401`.
-
-### Create, update, and delete records
-
-Write APIs require an authenticated session and never accept database primary
-key values from the frontend. Every application row has a unique `public_id`
-UUID. Use `guest_public_id`, `service_public_id`, `room_public_id`, and
-`booking_public_id` instead of numeric database IDs.
-
-All hotel staff roles can manage guests, bookings, payments, and service usage.
-Only `admin` and `manager` can manage the service catalogue or cancel a
-booking through `DELETE`.
-
-```text
-POST   /api/guests
-PATCH  /api/guests/:publicId
-DELETE /api/guests/:publicId
-
+#### 1. Manage Service Catalogue (Admin / Manager)
+```http
 POST   /api/services
 PATCH  /api/services/:publicId
 DELETE /api/services/:publicId
+```
 
-POST   /api/bookings
-PATCH  /api/bookings/:publicId
-POST   /api/cancel-booking
-POST   /api/bookings/:publicId/payments
-POST   /api/bookings/:publicId/services
+#### 2. Record Service Usage (Staff)
+```http
+POST /api/bookings/:publicId/services
+Content-Type: application/json
 
-GET    /api/service-request-options
+{
+  "service_public_id": "UUID_FROM_SERVICES",
+  "room_public_id": "UUID_FROM_ROOMS",
+  "quantity": 2
+}
+```
+
+#### 3. Manage Guest Service Requests (Staff)
+```http
 GET    /api/service-requests
 PATCH  /api/service-requests/:publicId/complete
+DELETE /api/service-requests/:publicId
 ```
 
-### Real-time staff notifications
+---
 
-The backend provides authenticated Socket.io notifications for connected staff
-clients. Connect to the backend URL with the same Better Auth session cookie
-used by the HTTP API:
+### Guest Self-Service Portal (`/api/guest`)
 
-```js
-const socket = io('http://localhost:4000', {
-  withCredentials: true,
-});
+Endpoints accessible to authenticated users with role `guest`:
 
-socket.on('notification', (notification) => {
-  console.log(notification.type, notification.message, notification.data);
-});
-```
-
-Current notification types are:
-
-- `service_request.created`
-- `service_request.completed`
-- `service_request.cancelled`
-- `guest.created`, `guest.updated`, `guest.deleted`
-- `service_catalogue.created`, `service_catalogue.updated`, `service_catalogue.deleted`
-- `booking.created`, `booking.updated`, `booking.cancelled`
-- `payment.created`
-- `booking.bill_recalculated`
-
-### Guest accounts
-
-Guest accounts use Better Auth with role `guest` and must include the
-`guestPublicId` user field linking them to a row in `guest`. Guest endpoints
-are scoped to that linked profile:
-
-```text
+```http
 GET    /api/guest/profile
 GET    /api/guest/bookings
 POST   /api/guest/bookings
@@ -461,269 +485,118 @@ DELETE /api/guest/service-requests/:publicId
 POST   /api/guest/bookings/:publicId/payments
 ```
 
-Payments currently record an internal payment; no external payment gateway is
-integrated. Guest service requests can be cancelled while they are `Pending`.
-Staff can cancel pending service requests with
-`DELETE /api/service-requests/:publicId`. All staff roles can manage guest
-reservations, service requests, and payments. Staff reservation cancellation
-uses the policy-aware `POST /api/cancel-booking` endpoint.
+---
 
-An administrator can still create a staff account through Better Auth:
+### Management & Analytical Reports (`/api/reports`)
 
-```js
-await fetch('http://localhost:4000/api/auth/admin/create-user', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    name: 'New Employee',
-    email: 'amina@example.com',
-    password: 'employee-password',
-    role: 'manager',
-  }),
-});
-```
+Query pre-aggregated database views with optional query filters:
 
-Unauthenticated sockets are rejected, and notifications are delivered only to
-authenticated `admin`, `manager`, and `front_desk` clients.
-
-Create a guest:
-
-```js
-await fetch('http://localhost:4000/api/guests', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    first_name: 'Amina',
-    last_name: 'Perera',
-    email: 'amina@example.com',
-    phone_number: '+94771234567',
-  }),
-});
-```
-
-Create a booking without exposing room or guest IDs:
-
-```js
-const response = await fetch('http://localhost:4000/api/bookings', {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    guest_public_id: 'UUID_FROM_GUESTS_RESPONSE',
-    room_public_ids: ['UUID_FROM_ROOMS_RESPONSE'],
-    check_in_time: '2026-11-10T14:00:00',
-    check_out_time: '2026-11-13T11:00:00',
-  }),
-});
-
-const { data } = await response.json();
-// data.public_id is used for later booking operations.
-```
-
-Add a payment or service usage to a booking:
-
-```js
-await fetch(`http://localhost:4000/api/bookings/${data.public_id}/payments`, {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    payment_method: 'Card',
-    amount: 15000,
-  }),
-});
-
-await fetch(`http://localhost:4000/api/bookings/${data.public_id}/services`, {
-  ...authRequestOptions,
-  method: 'POST',
-  body: JSON.stringify({
-    service_public_id: 'UUID_FROM_SERVICES_RESPONSE',
-    room_public_id: 'UUID_FROM_ROOMS_RESPONSE',
-    quantity: 1,
-  }),
-});
-```
-
-Booking creation runs in a transaction and checks overlapping active bookings
-before assigning rooms. Payment and service writes recalculate the booking
-bill using the existing database procedure. Foreign-key and database trigger
-errors are returned as explicit `400`, `409`, or `404` responses.
-
-Service requests can only be created for checked-in bookings and rooms assigned
-to those bookings. New requests have `status: "Pending"`. Staff can list
-requests, filter by `booking_public_id`, `room_public_id`, `service_public_id`,
-or `status`, and mark a request complete using its service-request `public_id`.
-
-### Reference data
-
-```text
-GET /api/branches
-GET /api/room-types
-GET /api/amenities
-GET /api/services
-GET /api/guests
-```
-
-Collection endpoints support pagination:
-
-```text
-GET /api/guests?limit=20&offset=0
-```
-
-`limit` is capped at 100.
-
-### Rooms
-
-```text
-GET /api/rooms
-GET /api/rooms?available_from=2026-10-20&available_to=2026-10-23
-```
-
-Viewing rooms and checking availability does not require logging in.
-The availability query excludes rooms with an overlapping `Booked` or
-`Checked-In` booking. Dates are interpreted as an exclusive end interval.
-
-### Bookings
-
-```text
-GET /api/bookings
-GET /api/bookings?status=Checked-In
-```
-
-Database primary-key IDs are intentionally not returned by these APIs and
-cannot be used as query parameters. Use human-readable values such as
-booking status, guest email, branch name, room number, and date ranges.
-
-### Reports
-
-The report endpoints query database views created by `npm run db:init`:
-
-- `report_occupancy`
-- `report_guest_billing`
-- `report_service_usage`
-- `report_revenue`
-- `report_top_services`
-
-The views keep report joins and calculations in the database while allowing
-the API to apply request-specific date filters.
-
-Room occupancy for a date interval:
-
-```text
+#### 1. Room Occupancy Report
+```http
 GET /api/reports/occupancy?from=2026-10-01&to=2026-10-31
 ```
+*Backing View:* `report_occupancy`
 
-Guest billing and outstanding balances:
-
-```text
+#### 2. Guest Billing Summary
+```http
 GET /api/reports/billing
 ```
+*Backing View:* `report_guest_billing` (includes paid amounts and outstanding dues).
 
-Service usage grouped by room and service:
-
-```text
-GET /api/reports/service-usage
+#### 3. Service Usage Breakdown
+```http
 GET /api/reports/service-usage?from=2026-10-01&to=2026-11-01
 ```
+*Backing View:* `report_service_usage` (grouped by room and service catalogue item).
 
-Revenue by branch for a date interval:
-
-```text
+#### 4. Monthly Revenue per Branch
+```http
 GET /api/reports/revenue?from=2026-10-01&to=2026-11-01
 ```
+*Backing View:* `report_revenue` (cleanly segregates room and service revenues by branch).
 
-Top-used services and their revenue:
-
-```text
+#### 5. Top-Used Services
+```http
 GET /api/reports/top-services
 ```
+*Backing View:* `report_top_services` (ranks service popularity and revenue contribution).
 
-The initial accounts are:
+---
 
-| Role       | Email                 | Password       |
-| ---------- | --------------------- | -------------- |
-| Admin      | `admin@hotel.com`     | `admin123`     |
-| Manager    | `manager@hotel.com`   | `manager123`   |
-| Front Desk | `frontdesk@hotel.com` | `frontdesk123` |
+## Real-Time Staff Notifications (WebSockets)
 
-These accounts must be created through an administrator bootstrap step before
-they can sign in. Do not use these development passwords in production.
+Staff dashboards receive real-time notifications via **Socket.io**. Connect with credentials:
 
-Seed the initialized database with representative SkyNest Hotels data:
+```js
+import { io } from 'socket.io-client';
 
-```bash
-npm run db:seed
+const socket = io('http://localhost:4000', {
+  withCredentials: true,
+});
+
+socket.on('notification', ({ type, message, data }) => {
+  console.log(`[Event: ${type}] ${message}`, data);
+});
 ```
 
-The seed script runs in a transaction and replaces the existing rows in these
-tables with deterministic sample data. It creates 3 branches, 12 rooms, 6
-services, 5 guests, 8 bookings, service usage records, and 5 payments
-including partial payments.
+### Supported Notification Events
 
-Destroy the configured database, including all its tables and data:
+| Event Type | Trigger |
+| :--- | :--- |
+| `booking.created` | New reservation made by staff or guest |
+| `booking.updated` | Booking dates, status, or check-in updated |
+| `booking.cancelled` | Reservation cancelled |
+| `booking.bill_recalculated` | Total bill recalculated |
+| `payment.created` | Payment recorded against a booking |
+| `service_request.created` | Guest submitted an in-room service request |
+| `service_request.completed` | Staff fulfilled a service request |
+| `service_request.cancelled` | Service request cancelled |
+| `guest.created`, `guest.updated`, `guest.deleted` | Guest profile changes |
+| `service_catalogue.created`, `updated`, `deleted` | Catalogue modifications |
 
-```bash
-npm run db:destroy
-```
+---
 
-Destroy and rebuild the configured database, including the schema and seed
-data:
+## Testing & Quality Assurance
 
-```bash
-npm run db:recreate
-```
-
-Both commands use the database configured by `DB_NAME` and reject names that
-contain characters outside letters, numbers, and underscores.
-
-## API tests
-
-Start the backend and ensure the database has been initialized and seeded:
-
-```bash
-npm start
-```
-
-In another terminal, run the full HTTP API test suite:
-
-```bash
-npm run api:test
-```
-
-To run all backend test suites, including the database trigger/procedure
-tests and the HTTP API suite, use:
-
+### Run All Test Suites
+Runs database trigger tests followed by integration HTTP API tests:
 ```bash
 npm test
 ```
 
-The test runner uses the three seeded development accounts, keeps separate
-session cookies for each role, tests admin-only operations, checks all data and
-report endpoints, verifies that database IDs are not exposed, and prints
-color-coded results with a pass/fail summary. Set `API_URL` to test another
-server:
-
+### Run Specific Test Suites
 ```bash
-API_URL=http://localhost:4000 npm run api:test
+# Database Triggers & Stored Procedures test suite:
+npm run db:test-triggers
+
+# Integration HTTP API test suite:
+npm run api:test
 ```
 
-The default `normal` log level prints one concise result for each request. Use
-the following options when diagnosing a failed endpoint:
-
+### API Test Logging Flags
+When troubleshooting API test failures, use flags for deeper visibility:
 ```bash
-# Print each request, response status, headers, and response body
+# Concise pass/fail output (default)
+npm run api:test
+
+# Verbose: prints requests, headers, and response payloads
 npm run api:test -- --verbose
 
-# Print the same request/response trace plus error stack traces
+# Debug: prints full traces and stack traces
 npm run api:test -- --debug
 
-# Print only the final pass/fail summary
+# Quiet: prints summary only
 npm run api:test -- --quiet
 ```
 
-The equivalent `API_TEST_LOG_LEVEL` values are `quiet`, `normal`, `verbose`,
-and `debug`. Command-line options take precedence over the environment
-variable. Request passwords, cookies, authorization values, and token-like
-fields are redacted from verbose and debug output. Long response bodies are
-truncated to keep logs readable.
+### Code Formatting & Linting
+```bash
+# Run ESLint:
+npm run lint
 
-check
-http://localhost:4000/api/health
+# Check code formatting:
+npm run format:check
+
+# Auto-format codebase:
+npm run format
+```

@@ -132,6 +132,16 @@ const validationTriggers = [
     IF NEW.tax_rate_at_booking < 0 OR NEW.tax_rate_at_booking > 1 THEN
       SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Tax rate must be between zero and one';
     END IF;
+    IF NEW.tax_id IS NOT NULL AND EXISTS (
+      SELECT 1
+      FROM booking_room br
+      JOIN room r ON r.room_id = br.room_id
+      JOIN tax_rate tr ON tr.tax_id = NEW.tax_id
+      WHERE br.booking_id = NEW.booking_id
+        AND r.branch_id <> tr.branch_id
+    ) THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Booking tax rate must belong to the same branch as the booked rooms';
+    END IF;
     IF NEW.booking_status = 'Checked-Out' AND NEW.outstanding_amount > 0 THEN
       SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Cannot check out with outstanding dues';
     END IF;
@@ -160,6 +170,28 @@ const validationTriggers = [
     END IF;
     IF NEW.nightly_rate_at_booking IS NULL OR NEW.nightly_rate_at_booking < 0 THEN
       SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Room rate must be nonnegative';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM booking_room br
+      JOIN room r_existing ON r_existing.room_id = br.room_id
+      JOIN room r_new ON r_new.room_id = NEW.room_id
+      WHERE br.booking_id = NEW.booking_id
+        AND br.room_id <> NEW.room_id
+        AND r_existing.branch_id <> r_new.branch_id
+    ) THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'All rooms in a booking must belong to the same hotel branch';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM booking b
+      JOIN tax_rate tr ON tr.tax_id = b.tax_id
+      JOIN room r ON r.room_id = NEW.room_id
+      WHERE b.booking_id = NEW.booking_id
+        AND b.tax_id IS NOT NULL
+        AND tr.branch_id <> r.branch_id
+    ) THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Room branch does not match booking tax rate branch';
     END IF;
     IF EXISTS (
       SELECT 1

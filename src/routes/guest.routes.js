@@ -89,31 +89,48 @@ router.post('/bookings', async (req, res, next) => {
     const roomIds = req.body.room_public_ids.map((value) => uuid(value, 'room_public_id'));
     connection = await pool.getConnection();
     await connection.beginTransaction();
+
+    const roomRecords = [];
+    for (const roomPublicId of roomIds) {
+      const [rooms] = await connection.execute(
+        'SELECT room_id, branch_id FROM room WHERE public_id = ? FOR UPDATE',
+        [roomPublicId],
+      );
+      if (!rooms.length) throw badRequest('A requested room does not exist');
+      roomRecords.push({ ...rooms[0], public_id: roomPublicId });
+    }
+
+    const branchIds = new Set(roomRecords.map((r) => r.branch_id));
+    if (branchIds.size > 1) {
+      throw badRequest('All rooms in a reservation must belong to the same hotel branch');
+    }
+
+    const [branchTax] = await connection.execute(
+      'SELECT tax_id FROM tax_rate WHERE branch_id = ? LIMIT 1',
+      [roomRecords[0].branch_id],
+    );
+    const taxId = branchTax.length ? branchTax[0].tax_id : null;
+
     const bookingId = await nextId(connection, 'booking', 'booking_id');
     const publicId = randomUUID();
     await connection.execute(
       `INSERT INTO booking
        (booking_id, public_id, guest_id, booking_time,
-        check_in_time, check_out_time, booking_status, payment_status)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'Booked', 'Unpaid')`,
-      [bookingId, publicId, req.guest.guest_id, checkIn, checkOut],
+        check_in_time, check_out_time, booking_status, payment_status, tax_id)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'Booked', 'Unpaid', ?)`,
+      [bookingId, publicId, req.guest.guest_id, checkIn, checkOut, taxId],
     );
-    for (const roomPublicId of roomIds) {
-      const [rooms] = await connection.execute(
-        'SELECT room_id FROM room WHERE public_id = ? FOR UPDATE',
-        [roomPublicId],
-      );
-      if (!rooms.length) throw badRequest('A requested room does not exist');
+    for (const room of roomRecords) {
       const [conflicts] = await connection.execute(
         `SELECT 1 FROM booking_room br JOIN booking b ON b.booking_id = br.booking_id
          WHERE br.room_id = ? AND b.booking_status IN ('Booked', 'Checked-In')
            AND b.check_in_time < ? AND b.check_out_time > ? LIMIT 1`,
-        [rooms[0].room_id, checkOut, checkIn],
+        [room.room_id, checkOut, checkIn],
       );
       if (conflicts.length) throw badRequest('A requested room is unavailable');
       await connection.execute(
         'INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, NULL)',
-        [bookingId, rooms[0].room_id],
+        [bookingId, room.room_id],
       );
     }
     await connection.commit();
@@ -125,6 +142,10 @@ router.post('/bookings', async (req, res, next) => {
     res.status(201).json({ data: { public_id: publicId } });
   } catch (error) {
     if (connection) await connection.rollback();
+    if (error.code === 'ER_SIGNAL_EXCEPTION' || error.sqlState === '45000') {
+      res.status(400).json({ error: error.sqlMessage || error.message });
+      return;
+    }
     next(error);
   } finally {
     connection?.release();
