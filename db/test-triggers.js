@@ -438,7 +438,7 @@ async function testCalculateBill() {
       await connection.execute(
         `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id, tax_rate_at_booking)
          VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 1, 0.18)`,
-        [9003, 3, '2026-10-10 14:00:00', '2026-10-12 11:00:00'],
+        [9003, 3, '2026-10-16 14:00:00', '2026-10-18 11:00:00'],
       );
       await connection.execute(
         `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, ?)`,
@@ -472,7 +472,7 @@ async function testCalculateBill() {
       await connection.execute(
         `INSERT INTO booking (booking_id, guest_id, booking_time, check_in_time, check_out_time, booking_status, payment_status, tax_id, tax_rate_at_booking)
          VALUES (?, ?, NOW(), ?, ?, 'Booked', 'Unpaid', 1, 0.18)`,
-        [9004, 4, '2026-10-10 14:00:00', '2026-10-12 11:00:00'],
+        [9004, 4, '2026-10-20 14:00:00', '2026-10-22 11:00:00'],
       );
       await connection.execute(
         `INSERT INTO booking_room (booking_id, room_id, price_at_booking) VALUES (?, ?, ?)`,
