@@ -14,7 +14,7 @@ export function initSockets(httpServer) {
   io = new Server(httpServer, {
     cors: {
       origin: true,
-      credentials: true, // IMPORTANT: Allow cookies 
+      credentials: true, // IMPORTANT: Allow cookies
     },
   });
 
