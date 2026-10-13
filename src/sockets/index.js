@@ -13,12 +13,8 @@ let io;
 export function initSockets(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL || [
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-        'http://localhost:4000',
-      ],
-      credentials: true,
+      origin: true,
+      credentials: true, // IMPORTANT: Allow cookies 
     },
   });
 
