@@ -16,16 +16,21 @@ export function createApp() {
 
   app.use(
     helmet({
+      contentSecurityPolicy: false,
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
-  // CORS config for frontend with credentials
-  app.use(
-    cors({
-      origin: true,
-      credentials: true, // IMPORTANT: Allow cookies
-    }),
-  );
+
+  const corsMiddleware = cors({
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Set-Cookie'],
+  });
+
+  // CORS config for frontend with credentials & preflight
+  app.use(corsMiddleware);
 
   app.use('/api/auth/guest-sign-up', express.json(), guestAuthRoutes);
 
