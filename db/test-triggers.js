@@ -582,22 +582,21 @@ async function testCancelBooking() {
   try {
     await connection.beginTransaction();
 
-    // First ensure cancellation_policy has data
-    const [policies] = await connection.execute('SELECT * FROM cancellation_policy');
-    if (policies.length === 0) {
-      await connection.execute(
-        `INSERT INTO cancellation_policy (rule_id, minimum_notice_hours, fee_type, fee_value, tax_rate, charge_services) VALUES (?, ?, ?, ?, ?, ?)`,
-        [1, 24, 'percentage', 0.5, 0.18, 1],
-      );
-      await connection.execute(
-        `INSERT INTO cancellation_policy (rule_id, minimum_notice_hours, fee_type, fee_value, tax_rate, charge_services) VALUES (?, ?, ?, ?, ?, ?)`,
-        [2, 72, 'first_night', 1, 0.18, 1],
-      );
-      await connection.execute(
-        `INSERT INTO cancellation_policy (rule_id, minimum_notice_hours, fee_type, fee_value, tax_rate, charge_services) VALUES (?, ?, ?, ?, ?, ?)`,
-        [3, 168, 'fixed', 10000, 0.18, 0],
-      );
-    }
+    // Explicitly set the cancellation policies expected by this test suite within the transaction.
+    // The transaction will be rolled back at the end of the test, restoring any preexisting policies.
+    await connection.execute('DELETE FROM cancellation_policy');
+    await connection.execute(
+      `INSERT INTO cancellation_policy (rule_id, minimum_notice_hours, fee_type, fee_value, tax_rate, charge_services) VALUES (?, ?, ?, ?, ?, ?)`,
+      [1, 24, 'percentage', 0.5, 0.18, 1],
+    );
+    await connection.execute(
+      `INSERT INTO cancellation_policy (rule_id, minimum_notice_hours, fee_type, fee_value, tax_rate, charge_services) VALUES (?, ?, ?, ?, ?, ?)`,
+      [2, 72, 'first_night', 1, 0.18, 1],
+    );
+    await connection.execute(
+      `INSERT INTO cancellation_policy (rule_id, minimum_notice_hours, fee_type, fee_value, tax_rate, charge_services) VALUES (?, ?, ?, ?, ?, ?)`,
+      [3, 168, 'fixed', 10000, 0.18, 0],
+    );
 
     // Test 1: Cancel a booking more than 72 hours before check-in (first_night policy)
     try {

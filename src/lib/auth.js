@@ -31,7 +31,7 @@ export const authOptions = {
   emailAndPassword: {
     enabled: true,
     disableSignUp: true,
-    sendResetPassword: async ({ user, url, token }, request) => {
+    sendResetPassword: async ({ user, url, token }) => {
       console.log(`\n🔑 ==========================================`);
       console.log(`🔑 [Password Reset] User: ${user.email} (${user.name})`);
       console.log(`🔑 Reset URL: ${url}`);
