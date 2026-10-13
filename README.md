@@ -72,6 +72,11 @@ FLUSH PRIVILEGES;
 
 Use this account in `DB_USER` and `DB_PASSWORD` for the running backend.
 
+Database destruction and recreation use the migration account through
+`DB_ADMIN_USER` and `DB_ADMIN_PASSWORD`. That account must also have global
+permission to drop and create databases; grants only on `hrgsms.*` are not
+sufficient because the database is dropped before it is created again.
+
 Run schema creation, database recreation, Better Auth migration, and seeding
 with a separate migration/administrator account. Do not grant those
 schema-changing permissions to `hrgsms_app`:
@@ -83,13 +88,18 @@ CREATE USER 'hrgsms_migrator'@'localhost'
 GRANT ALL PRIVILEGES
   ON hrgsms.* TO 'hrgsms_migrator'@'localhost';
 
+# Required because this same account runs db:destroy and db:recreate.
+GRANT CREATE, DROP ON *.* TO 'hrgsms_migrator'@'localhost';
+
 FLUSH PRIVILEGES;
 ```
 
-For local development, temporarily use the migration account in `.env` when
-running `db:init`, `db:recreate`, `auth:migrate`, or the seed scripts, then
-restore `DB_USER=hrgsms_app` before starting the server. The migration account
-is not used by the running application.
+The database tooling sets `DB_USE_ADMIN=true` automatically for schema
+creation, database recreation, trigger tests, and Better Auth migrations.
+Those commands use `DB_ADMIN_USER` and `DB_ADMIN_PASSWORD`. Hotel data seeding
+and authentication account seeding use the normal `DB_USER` and
+`DB_PASSWORD` credentials because they only modify rows. Keep
+`DB_USER=hrgsms_app` for the running backend.
 
 If binary logging is enabled, MySQL may still reject stored procedure and
 trigger definitions for the migration account with a `SUPER` privilege error.
