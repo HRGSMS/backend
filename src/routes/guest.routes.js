@@ -119,6 +119,14 @@ router.post('/bookings', async (req, res, next) => {
     if (!Array.isArray(req.body?.room_public_ids) || !req.body.room_public_ids.length) {
       throw badRequest('room_public_ids must contain at least one UUID');
     }
+    const paymentMethod = req.body?.payment_method;
+    if (typeof paymentMethod !== 'string' || !paymentMethod.trim()) {
+      throw badRequest(
+        'payment_method is required. An advance payment of at least 50% is required to secure a reservation',
+      );
+    }
+    const paymentOption = req.body?.payment_option === 'full' ? 'full' : 'half';
+
     const roomIds = req.body.room_public_ids.map((value) => uuid(value, 'room_public_id'));
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -169,7 +177,32 @@ router.post('/bookings', async (req, res, next) => {
       );
     }
 
-    // Immediately calculate initial bill and taxes
+    // Calculate initial bill to determine required 50% advance deposit
+    await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
+
+    const [billRows] = await connection.execute(
+      'SELECT total_charge FROM booking WHERE booking_id = ?',
+      [bookingId],
+    );
+    const totalCharge = Number(billRows[0]?.total_charge || 0);
+    if (totalCharge <= 0) {
+      throw badRequest('Calculated room charge must be greater than zero');
+    }
+
+    // Calculate deposit: 100% if full payment selected, otherwise 50%
+    const depositAmount =
+      paymentOption === 'full' ? totalCharge : Math.round(totalCharge * 0.5 * 100) / 100;
+
+    const paymentId = await nextId(connection, 'payment', 'payment_id');
+    const paymentPublicId = randomUUID();
+    await connection.execute(
+      `INSERT INTO payment
+       (payment_id, public_id, booking_id, payment_date, payment_method, amount)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)`,
+      [paymentId, paymentPublicId, bookingId, paymentMethod.trim(), depositAmount],
+    );
+
+    // Recalculate bill to apply deposit and update payment_status and outstanding_amount
     await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
 
     const [rows] = await connection.execute(
@@ -181,8 +214,13 @@ router.post('/bookings', async (req, res, next) => {
     await connection.commit();
     notifyStaff({
       type: 'booking.created',
-      message: 'A guest created a reservation',
-      data: { public_id: publicId, guest_public_id: req.guest.public_id },
+      message: `A guest created a reservation with advance payment (${depositAmount} LKR)`,
+      data: {
+        public_id: publicId,
+        guest_public_id: req.guest.public_id,
+        paid_amount: depositAmount,
+        payment_status: rows[0].payment_status,
+      },
     });
     res.status(201).json({ data: rows[0] });
   } catch (error) {
