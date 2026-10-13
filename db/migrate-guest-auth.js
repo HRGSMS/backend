@@ -1,4 +1,5 @@
 import { pool } from '../src/config/db.js';
+import { ensureGuestAuthLink } from './init.js';
 
 /**
  * Adds the Better Auth user field used to link guest accounts to hotel guests.
@@ -10,20 +11,7 @@ async function migrateGuestAuth() {
   const connection = await pool.getConnection();
 
   try {
-    const [columns] = await connection.execute(
-      `SELECT 1
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'user'
-         AND COLUMN_NAME = 'guestPublicId'`,
-    );
-
-    if (!columns.length) {
-      await connection.query(
-        'ALTER TABLE `user` ADD COLUMN `guestPublicId` CHAR(36) NULL',
-      );
-      console.log('Added Better Auth guestPublicId field');
-    }
+    await ensureGuestAuthLink(connection);
   } finally {
     connection.release();
     await pool.end();

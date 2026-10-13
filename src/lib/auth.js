@@ -27,7 +27,7 @@ export const authOptions = {
       guestPublicId: {
         type: 'string',
         required: false,
-        input: true,
+        input: false,
       },
     },
   },
