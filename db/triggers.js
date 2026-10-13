@@ -47,6 +47,9 @@ const calculateBill = `
     SELECT COALESCE(SUM(amount), 0) INTO v_paid
       FROM payment WHERE booking_id = p_booking_id;
     SET v_total = v_room + v_service + v_tax;
+    UPDATE booking_room
+      SET price_at_booking = nightly_rate_at_booking * v_nights
+      WHERE booking_id = p_booking_id;
     UPDATE booking SET total_charge = v_total, total_tax_amount = v_tax,
       outstanding_amount = GREATEST(v_total - v_paid, 0),
       credit_amount = GREATEST(v_paid - v_total, 0),
@@ -129,6 +132,21 @@ const validationTriggers = [
     IF NEW.tax_rate_at_booking < 0 OR NEW.tax_rate_at_booking > 1 THEN
       SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Tax rate must be between zero and one';
     END IF;
+    IF NEW.booking_status = 'Checked-Out' AND NEW.outstanding_amount > 0 THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Cannot check out with outstanding dues';
+    END IF;
+    IF NEW.booking_status IN ('Booked', 'Checked-In') AND EXISTS (
+      SELECT 1
+      FROM booking_room br_this
+      JOIN booking_room br_other ON br_other.room_id = br_this.room_id AND br_other.booking_id <> NEW.booking_id
+      JOIN booking b_other ON b_other.booking_id = br_other.booking_id
+      WHERE br_this.booking_id = NEW.booking_id
+        AND b_other.booking_status IN ('Booked', 'Checked-In')
+        AND b_other.check_in_time < NEW.check_out_time
+        AND b_other.check_out_time > NEW.check_in_time
+    ) THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Room is already booked for the updated period';
+    END IF;
   `,
   },
   // Save the nightly rate and calculate the full stay price.
@@ -142,6 +160,20 @@ const validationTriggers = [
     END IF;
     IF NEW.nightly_rate_at_booking IS NULL OR NEW.nightly_rate_at_booking < 0 THEN
       SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Room rate must be nonnegative';
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM booking_room br
+      JOIN booking b_existing ON b_existing.booking_id = br.booking_id
+      JOIN booking b_new ON b_new.booking_id = NEW.booking_id
+      WHERE br.room_id = NEW.room_id
+        AND br.booking_id <> NEW.booking_id
+        AND b_existing.booking_status IN ('Booked', 'Checked-In')
+        AND b_new.booking_status IN ('Booked', 'Checked-In')
+        AND b_existing.check_in_time < b_new.check_out_time
+        AND b_existing.check_out_time > b_new.check_in_time
+    ) THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Room is already booked for the requested period';
     END IF;
     SET NEW.price_at_booking = NEW.nightly_rate_at_booking * (
       SELECT GREATEST(DATEDIFF(check_out_time, check_in_time), 1)
@@ -181,6 +213,49 @@ const validationTriggers = [
       SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Payment amount must be positive';
     END IF;
   `,
+  },
+];
+
+// Room status automation keeps room.current_status and room.booking_availability in sync.
+const roomStatusTriggers = [
+  {
+    name: 'booking_room_status_after_update',
+    table: 'booking',
+    event: 'UPDATE',
+    timing: 'AFTER',
+    body: `
+      IF NEW.booking_status = 'Checked-In' AND (OLD.booking_status IS NULL OR OLD.booking_status <> 'Checked-In') THEN
+        UPDATE room SET current_status = 1, booking_availability = 0
+        WHERE room_id IN (SELECT room_id FROM booking_room WHERE booking_id = NEW.booking_id);
+      ELSEIF NEW.booking_status IN ('Checked-Out', 'Cancelled') AND OLD.booking_status NOT IN ('Checked-Out', 'Cancelled') THEN
+        UPDATE room SET current_status = 0, booking_availability = 1
+        WHERE room_id IN (SELECT room_id FROM booking_room WHERE booking_id = NEW.booking_id);
+      END IF;
+    `,
+  },
+  {
+    name: 'booking_room_status_after_insert',
+    table: 'booking',
+    event: 'INSERT',
+    timing: 'AFTER',
+    body: `
+      IF NEW.booking_status = 'Checked-In' THEN
+        UPDATE room SET current_status = 1, booking_availability = 0
+        WHERE room_id IN (SELECT room_id FROM booking_room WHERE booking_id = NEW.booking_id);
+      END IF;
+    `,
+  },
+  {
+    name: 'booking_room_status_after_room_insert',
+    table: 'booking_room',
+    event: 'INSERT',
+    timing: 'AFTER',
+    body: `
+      IF (SELECT booking_status FROM booking WHERE booking_id = NEW.booking_id) = 'Checked-In' THEN
+        UPDATE room SET current_status = 1, booking_availability = 0
+        WHERE room_id = NEW.room_id;
+      END IF;
+    `,
   },
 ];
 
@@ -243,5 +318,15 @@ export async function installTriggers(connection) {
         priceTriggerBody(rule, event),
       );
     }
+  }
+  for (const { name, table, event, timing, body } of roomStatusTriggers) {
+    await connection.query(`DROP TRIGGER IF EXISTS ${name}`);
+    await connection.query(`
+      CREATE TRIGGER ${name} ${timing} ${event} ON ${table}
+      FOR EACH ROW
+      BEGIN
+        ${body}
+      END
+    `);
   }
 }
