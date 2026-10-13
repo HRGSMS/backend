@@ -36,7 +36,6 @@ const tableDefinitions = [
     CREATE TABLE IF NOT EXISTS \`booking\` (
       \`booking_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
-      \`booking_reference\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
       \`guest_id\` INT NOT NULL,
       \`booking_time\` DATETIME,
       \`check_in_time\` DATETIME,
@@ -212,6 +211,27 @@ export async function ensureGuestAuthLink(connection) {
     return;
   }
 
+  /**
+   * Removes the obsolete duplicate booking UUID from existing databases.
+   *
+   * @param {import('mysql2/promise').PoolConnection} connection Database connection.
+   * @returns {Promise<void>} Resolves after the booking schema is current.
+   */
+  async function removeBookingReference(connection) {
+    const [columns] = await connection.execute(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'booking'
+         AND COLUMN_NAME = 'booking_reference'`,
+    );
+
+    if (columns.length) {
+      await connection.query('ALTER TABLE \`booking\` DROP COLUMN \`booking_reference\`');
+      console.log('Removed obsolete booking.booking_reference column');
+    }
+  }
+
   const [columns] = await connection.execute(
     `SELECT 1
      FROM information_schema.COLUMNS
@@ -351,6 +371,7 @@ export async function initializeDatabase(database = pool) {
       await connection.query(definition);
     }
 
+    await removeBookingReference(connection);
     await ensureGuestAuthLink(connection);
     await installTriggers(connection);
 

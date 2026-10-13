@@ -63,7 +63,7 @@ router.get('/profile', async (req, res, next) => {
 router.get('/bookings', async (req, res, next) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT b.public_id, b.booking_reference, b.booking_time, b.check_in_time,
+      `SELECT b.public_id, b.booking_time, b.check_in_time,
               b.check_out_time, b.cancellation_time, b.booking_status,
               b.payment_status, b.total_charge, b.outstanding_amount
        FROM booking b WHERE b.guest_id = ? ORDER BY b.check_in_time DESC`,
@@ -91,13 +91,12 @@ router.post('/bookings', async (req, res, next) => {
     await connection.beginTransaction();
     const bookingId = await nextId(connection, 'booking', 'booking_id');
     const publicId = randomUUID();
-    const bookingReference = randomUUID();
     await connection.execute(
       `INSERT INTO booking
-       (booking_id, public_id, booking_reference, guest_id, booking_time,
+       (booking_id, public_id, guest_id, booking_time,
         check_in_time, check_out_time, booking_status, payment_status)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'Booked', 'Unpaid')`,
-      [bookingId, publicId, bookingReference, req.guest.guest_id, checkIn, checkOut],
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, 'Booked', 'Unpaid')`,
+      [bookingId, publicId, req.guest.guest_id, checkIn, checkOut],
     );
     for (const roomPublicId of roomIds) {
       const [rooms] = await connection.execute(
@@ -123,7 +122,7 @@ router.post('/bookings', async (req, res, next) => {
       message: 'A guest created a reservation',
       data: { public_id: publicId, guest_public_id: req.guest.public_id },
     });
-    res.status(201).json({ data: { public_id: publicId, booking_reference: bookingReference } });
+    res.status(201).json({ data: { public_id: publicId } });
   } catch (error) {
     if (connection) await connection.rollback();
     next(error);

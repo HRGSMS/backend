@@ -177,7 +177,6 @@ router.get('/bookings', async (req, res, next) => {
         SELECT
           CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
           g.email AS guest_email,
-          b.booking_reference,
           b.public_id,
           GROUP_CONCAT(DISTINCT br_branch.name ORDER BY br_branch.name) AS branch_names,
           b.booking_time,
@@ -196,7 +195,7 @@ router.get('/bookings', async (req, res, next) => {
         LEFT JOIN room r ON r.room_id = br.room_id
         LEFT JOIN branch br_branch ON br_branch.branch_id = r.branch_id
         ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
-        GROUP BY b.booking_id, b.booking_reference, g.first_name, g.last_name, g.email
+        GROUP BY b.booking_id, g.first_name, g.last_name, g.email
         ORDER BY b.check_in_time DESC
       `,
       parameters,

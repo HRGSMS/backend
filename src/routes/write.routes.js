@@ -322,13 +322,12 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
     const taxId = await getTaxId(connection, req.body?.tax_public_id);
     const bookingId = await nextId(connection, 'booking', 'booking_id');
     const publicId = randomUUID();
-    const bookingReference = randomUUID();
     await connection.execute(
       `INSERT INTO booking
-        (booking_id, public_id, booking_reference, guest_id, booking_time, check_in_time, check_out_time,
+        (booking_id, public_id, guest_id, booking_time, check_in_time, check_out_time,
          booking_status, payment_status, tax_id)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'Unpaid', ?)`,
-      [bookingId, publicId, bookingReference, guestId, checkIn, checkOut, status, taxId],
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'Unpaid', ?)`,
+      [bookingId, publicId, guestId, checkIn, checkOut, status, taxId],
     );
     for (const roomPublicId of req.body.room_public_ids) {
       const [rooms] = await connection.execute(
@@ -359,7 +358,7 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
       data: { public_id: publicId, booking_status: status },
     });
     res.status(201).json({
-      data: { public_id: publicId, booking_reference: bookingReference, booking_status: status },
+      data: { public_id: publicId, booking_status: status },
     });
   } catch (error) {
     if (connection) await connection.rollback();
