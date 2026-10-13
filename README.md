@@ -148,9 +148,33 @@ Default seeded login credentials:
 - **Admin**: `admin@hotel.com` / `admin123`
 - **Manager**: `manager@hotel.com` / `manager123`
 - **Front Desk**: `frontdesk@hotel.com` / `frontdesk123`
-- **Guests**: Any seeded guest email (e.g. `amara.perera@example.com`, `nimal.fernando@example.com`, `kavya.silva@example.com`, `dilan.j@example.com`, `maya.w@example.com`, `oliver.thompson@example.com`, `sophie.chen@example.com`) / password: `guest123`
+- **Guests**: Any seeded guest email / password: `guest123`
 
-Testing Current implemented triggers
+### Comprehensive Edge-Case Dataset
+
+In addition to the standard rubric seed (`npm run db:seed`), an extended dataset covering all hotel operational edge cases is provided in `db/seed-comprehensive.js`:
+
+```bash
+# Seed the comprehensive dataset
+npm run db:seed:comprehensive
+
+# Or recreate database, migrate auth, seed comprehensive data, and seed user accounts
+npm run db:recreate:comprehensive
+```
+
+**Edge cases modeled in the comprehensive dataset:**
+
+- **Multi-room bookings**: Single reservations spanning 2+ rooms with split service billing.
+- **Same-day room turnover**: Room checkout at 11:00 AM and next guest checkin at 14:00 PM on the same date.
+- **All booking lifecycle states**: `Booked`, `Checked-In`, `Checked-Out`, and `Cancelled`.
+- **All financial states**: `Paid`, `Partially Paid` (deposits), `Unpaid`, and `Credit Due` (overpayments/refund balances).
+- **Duration boundaries**: 1-night minimum stay vs. 14-night extended long stays.
+- **Multiple payment methods**: Cash, Card, Bank Transfer, and split-payment transactions.
+- **Service usage variations**: 0 services consumed, single services, high-volume VIP stays (5+ services), and `Pending` vs. `Completed` requests.
+- **Cancellation policy tiers**: >72h free cancellation, 24-71h first-night penalty, and <24h late penalty with services charged.
+- **Guest diversity**: Domestic, international tourists, corporate guests, and newly registered guests with 0 bookings.
+
+Testing current implemented triggers:
 
 ```bash
 npm run db:test-triggers
