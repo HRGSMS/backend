@@ -397,7 +397,7 @@ DELETE /api/services/:publicId
 
 POST   /api/bookings
 PATCH  /api/bookings/:publicId
-DELETE /api/bookings/:publicId
+POST   /api/cancel-booking
 POST   /api/bookings/:publicId/payments
 POST   /api/bookings/:publicId/services
 
@@ -451,6 +451,10 @@ POST   /api/guest/bookings/:publicId/payments
 
 Payments currently record an internal payment; no external payment gateway is
 integrated. Guest service requests can be cancelled while they are `Pending`.
+Staff can cancel pending service requests with
+`DELETE /api/service-requests/:publicId`. All staff roles can manage guest
+reservations, service requests, and payments. Staff reservation cancellation
+uses the policy-aware `POST /api/cancel-booking` endpoint.
 
 An administrator can still create a staff account through Better Auth:
 

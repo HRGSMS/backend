@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../config/db.js';
+import { requireRole } from '../middleware/require-role.middleware.js';
 import { notifyStaff } from '../sockets/index.js';
 
 const router = Router();
+const staffRoles = requireRole('admin', 'manager', 'front_desk');
 
 router.use((req, res, next) => {
   const identifierQuery = Object.keys(req.query).find(
@@ -294,13 +296,14 @@ router.get('/service-requests', async (req, res, next) => {
   }
 });
 
-router.patch('/service-requests/:publicId/complete', async (req, res, next) => {
+router.patch('/service-requests/:publicId/complete', staffRoles, async (req, res, next) => {
   try {
     const role = req.auth?.user?.role;
     if (!['admin', 'manager', 'front_desk'].includes(role)) {
       res.status(role ? 403 : 401).json({
         error: 'You are not authorized to complete service requests',
       });
+
       return;
     }
 
@@ -342,6 +345,50 @@ router.patch('/service-requests/:publicId/complete', async (req, res, next) => {
     next(error);
   }
 });
+
+router.delete('/service-requests/:publicId', staffRoles, async (req, res, next) => {
+  let connection;
+  try {
+    const requestPublicId = req.params.publicId;
+    if (typeof requestPublicId !== 'string' || requestPublicId.length !== 36) {
+      res.status(400).json({ error: 'Service request public_id must be a UUID' });
+      return;
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [requests] = await connection.execute(
+      `SELECT su.usage_id, su.booking_id
+       FROM service_usage su
+       WHERE su.public_id = ? AND su.status = 'Pending'
+       FOR UPDATE`,
+      [requestPublicId],
+    );
+    if (!requests.length) {
+      await connection.rollback();
+      res.status(404).json({ error: 'Pending service request not found' });
+      return;
+    }
+
+    await connection.execute('DELETE FROM service_usage WHERE usage_id = ?', [
+      requests[0].usage_id,
+    ]);
+    await connection.execute('CALL sp_calculate_bill(?)', [requests[0].booking_id]);
+    await connection.commit();
+    notifyStaff({
+      type: 'service_request.cancelled',
+      message: 'A staff member cancelled a service request',
+      data: { public_id: requestPublicId },
+    });
+    res.status(204).send();
+  } catch (error) {
+    if (connection) await connection.rollback();
+    next(error);
+  } finally {
+    connection?.release();
+  }
+});
+
 router.post('/calculate-bill', async (req, res, next) => {
   const bookingPublicId = req.body?.booking_public_id;
   if (typeof bookingPublicId !== 'string' || !bookingPublicId.trim()) {
@@ -402,7 +449,7 @@ router.post('/calculate-bill', async (req, res, next) => {
 });
 
 //Booking cancellation - With trigger
-router.post('/cancel-booking', async (req, res, next) => {
+router.post('/cancel-booking', staffRoles, async (req, res, next) => {
   const bookingPublicId = req.body?.booking_public_id;
   if (typeof bookingPublicId !== 'string' || !bookingPublicId.trim()) {
     res.status(400).json({ error: 'booking_public_id must be a UUID' });
