@@ -188,6 +188,24 @@ const tableDefinitions = [
       INDEX \`pending_notifications\` (\`delivered_at\`, \`available_at\`)
     ) ENGINE=InnoDB
   `,
+  `
+    CREATE TABLE IF NOT EXISTS \`hotel_config\` (
+      \`config_key\`   VARCHAR(80)   NOT NULL,
+      \`config_value\` VARCHAR(255)  NOT NULL,
+      \`description\`  VARCHAR(255)  NULL,
+      PRIMARY KEY (\`config_key\`)
+    )
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS \`payment_method\` (
+      \`method_id\`    INT          NOT NULL AUTO_INCREMENT,
+      \`public_id\`    CHAR(36)     NOT NULL UNIQUE DEFAULT (UUID()),
+      \`method_name\`  VARCHAR(60)  NOT NULL UNIQUE,
+      \`display_name\` VARCHAR(80)  NOT NULL,
+      \`is_active\`    TINYINT(1)   NOT NULL DEFAULT 1,
+      PRIMARY KEY (\`method_id\`)
+    )
+  `,
 ];
 
 /**
@@ -222,6 +240,29 @@ export async function ensureGuestAuthLink(connection) {
   if (!columns.length) {
     await connection.query('ALTER TABLE `user` ADD COLUMN `guestPublicId` CHAR(36) NULL');
     console.log('Added Better Auth user.guestPublicId link column');
+  }
+}
+
+/**
+ * Ensures the status column exists in service_usage.
+ *
+ * @param {import('mysql2/promise').PoolConnection} connection
+ * @returns {Promise<void>}
+ */
+export async function ensureServiceUsageStatus(connection) {
+  const [columns] = await connection.execute(
+    `SELECT 1
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'service_usage'
+       AND COLUMN_NAME = 'status'`,
+  );
+
+  if (!columns.length) {
+    await connection.query(
+      "ALTER TABLE `service_usage` ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'Pending'",
+    );
+    console.log('Added status column to service_usage');
   }
 }
 
@@ -373,6 +414,7 @@ export async function initializeDatabase(database = pool) {
       await connection.query(definition);
     }
     await ensureGuestAuthLink(connection);
+    await ensureServiceUsageStatus(connection);
     await installTriggers(connection);
 
     for (const definition of viewDefinitions) {

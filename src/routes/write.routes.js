@@ -537,6 +537,46 @@ router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
   }
 });
 
+router.delete('/bookings/:publicId', catalogueRoles, async (req, res, next) => {
+  let connection;
+  try {
+    const publicId = requiredString(req.params.publicId, 'public_id', 36);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [bookings] = await connection.execute(
+      'SELECT booking_id FROM booking WHERE public_id = ? FOR UPDATE',
+      [publicId],
+    );
+
+    if (!bookings.length) {
+      await connection.rollback();
+      res.status(404).json({ error: 'Booking not found' });
+      return;
+    }
+
+    const bookingId = bookings[0].booking_id;
+    await connection.execute('DELETE FROM service_usage WHERE booking_id = ?', [bookingId]);
+    await connection.execute('DELETE FROM payment WHERE booking_id = ?', [bookingId]);
+    await connection.execute('DELETE FROM booking_room WHERE booking_id = ?', [bookingId]);
+    await connection.execute('DELETE FROM notification_outbox WHERE booking_id = ?', [bookingId]);
+    await connection.execute('DELETE FROM booking WHERE booking_id = ?', [bookingId]);
+
+    await connection.commit();
+    notifyStaff({
+      type: 'booking.deleted',
+      message: 'A booking was deleted',
+      data: { public_id: publicId },
+    });
+    res.status(204).send();
+  } catch (error) {
+    if (connection) await connection.rollback();
+    next(error);
+  } finally {
+    connection?.release();
+  }
+});
+
 router.post('/bookings/:publicId/payments', staffRoles, async (req, res, next) => {
   let connection;
   try {
