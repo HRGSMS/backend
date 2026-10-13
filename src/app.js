@@ -12,7 +12,11 @@ import { requireAuth, optionalAuth } from './middleware/require-auth.middleware.
 export function createApp() {
   const app = express();
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   // CORS config for frontend with credentials
   app.use(
     cors({
