@@ -382,6 +382,35 @@ GET    /api/service-requests
 PATCH  /api/service-requests/:publicId/complete
 ```
 
+### Real-time staff notifications
+
+The backend provides authenticated Socket.io notifications for connected staff
+clients. Connect to the backend URL with the same Better Auth session cookie
+used by the HTTP API:
+
+```js
+const socket = io('http://localhost:4000', {
+  withCredentials: true,
+});
+
+socket.on('notification', (notification) => {
+  console.log(notification.type, notification.message, notification.data);
+});
+```
+
+Current notification types are:
+
+- `service_request.created`
+- `service_request.completed`
+- `guest.created`, `guest.updated`, `guest.deleted`
+- `service_catalogue.created`, `service_catalogue.updated`, `service_catalogue.deleted`
+- `booking.created`, `booking.updated`, `booking.cancelled`
+- `payment.created`
+- `booking.bill_recalculated`
+
+Unauthenticated sockets are rejected, and notifications are delivered only to
+authenticated `admin`, `manager`, and `front_desk` clients.
+
 Create a guest:
 
 ```js

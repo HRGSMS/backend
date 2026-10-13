@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../config/db.js';
+import { notifyStaff } from '../sockets/index.js';
 
 const router = Router();
 
@@ -332,6 +333,11 @@ router.patch('/service-requests/:publicId/complete', async (req, res, next) => {
           : 'Service request was already completed',
       data: rows[0],
     });
+    notifyStaff({
+      type: 'service_request.completed',
+      message: 'A guest service request was completed',
+      data: rows[0],
+    });
   } catch (error) {
     next(error);
   }
@@ -366,6 +372,15 @@ router.post('/calculate-bill', async (req, res, next) => {
       [bookingId],
     );
     await connection.commit();
+    notifyStaff({
+      type: 'booking.bill_recalculated',
+      message: 'A booking bill was recalculated',
+      data: {
+        booking_public_id: bookingPublicId,
+        payment_status: rows[0].payment_status,
+        outstanding_amount: rows[0].outstanding_amount,
+      },
+    });
     res.json({ data: rows[0] });
   } catch (error) {
     if (connection) {
@@ -418,6 +433,15 @@ router.post('/cancel-booking', async (req, res, next) => {
       [bookingId],
     );
     await connection.commit();
+    notifyStaff({
+      type: 'booking.cancelled',
+      message: 'A booking was cancelled',
+      data: {
+        booking_public_id: bookingPublicId,
+        cancellation_fee: rows[0].cancellation_fee,
+        payment_status: rows[0].payment_status,
+      },
+    });
     res.json({ data: rows[0] });
   } catch (error) {
     if (connection) {
@@ -505,7 +529,8 @@ router.get('/reports/billing', async (req, res, next) => {
       branchFilter = 'HAVING branch_names LIKE ?';
     }
 
-    const [rows] = await pool.execute(`
+    const [rows] = await pool.execute(
+      `
       SELECT
         g.public_id AS guest_public_id,
         b.public_id AS booking_public_id,
@@ -533,7 +558,9 @@ router.get('/reports/billing', async (req, res, next) => {
         b.total_charge
       ${branchFilter}
       ORDER BY calculated_outstanding_amount DESC
-    `, parameters);
+    `,
+      parameters,
+    );
 
     res.json({ data: rows });
   } catch (error) {
