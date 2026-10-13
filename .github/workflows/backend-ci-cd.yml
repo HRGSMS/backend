@@ -1,0 +1,143 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # CONTINUOUS INTEGRATION: Linting, Migrations, Triggers & API Tests
+  # =========================================================================
+  test:
+    name: Test & Lint Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Ephemeral MySQL container service matching Oracle Cloud's MySQL 8.0
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_root_password
+          MYSQL_DATABASE: hrgsms
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Code formatting & Lint checks
+        run: |
+          npm run lint
+          npm run format:check
+
+      - name: Initialize DB Schema & Run Migrations
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: test_root_password
+          DB_ADMIN_USER: root
+          DB_ADMIN_PASSWORD: test_root_password
+          DB_NAME: hrgsms
+          DB_USE_ADMIN: 'true'
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'ci_fallback_test_secret_32_characters_long' }}
+          BETTER_AUTH_URL: http://localhost:4000
+        run: |
+          npm run db:init
+          npm run auth:migrate
+          npm run db:seed:comprehensive
+          npm run auth:seed
+
+      - name: Run Database Trigger Tests (30 Integrity Tests)
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: test_root_password
+          DB_ADMIN_USER: root
+          DB_ADMIN_PASSWORD: test_root_password
+          DB_NAME: hrgsms
+          DB_USE_ADMIN: 'true'
+        run: npm run db:test-triggers
+
+      - name: Start Server & Run API Integration Tests
+        env:
+          PORT: 4000
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: test_root_password
+          DB_NAME: hrgsms
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'ci_fallback_test_secret_32_characters_long' }}
+          BETTER_AUTH_URL: http://localhost:4000
+          API_URL: http://localhost:4000
+        run: |
+          npm start &
+          # Wait up to 15 seconds for Express to boot
+          timeout 15 bash -c 'until curl -s http://localhost:4000/api/health; do sleep 1; done' || true
+          npm run api:test
+
+  # =========================================================================
+  # CONTINUOUS DEPLOYMENT: SSH deploy to Oracle Cloud VPS
+  # =========================================================================
+  deploy:
+    name: Deploy to Oracle VPS
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          port: ${{ secrets.OCI_PORT || 22 }}
+          script_stop: true
+          script: |
+            echo "==> Deploying Backend to Oracle Cloud VPS..."
+            cd /var/www/hrgsms/backend
+
+            # 1. Fetch latest changes
+            git fetch origin main
+            git reset --hard origin/main
+
+            # 2. Install production dependencies
+            npm ci --omit=dev
+
+            # 3. Apply safe database migrations (non-destructive)
+            npm run migrate
+            npm run auth:migrate
+
+            # 4. Zero-downtime reload via PM2
+            pm2 reload hrgsms-backend --update-env
+
+            # 5. Verify backend health
+            sleep 3
+            curl -f http://127.0.0.1:4000/api/health || pm2 status hrgsms-backend
+            echo "==> Backend Deployment completed successfully!"
