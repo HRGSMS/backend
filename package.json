@@ -14,7 +14,7 @@
     "db:recreate": "node db/recreate.js && npm run db:init && npm run auth:migrate && npm run db:seed && npm run auth:seed",
     "db:recreate:comprehensive": "node db/recreate.js && npm run db:init && npm run auth:migrate && npm run db:seed:comprehensive && npm run auth:seed",
     "db:test-triggers": "cross-env DB_USE_ADMIN=true node db/test-triggers.js",
-    "auth:migrate": "cross-env DB_USE_ADMIN=true npx --yes auth@latest migrate && cross-env DB_USE_ADMIN=true node db/migrate-guest-auth.js",
+    "auth:migrate": "cross-env DB_USE_ADMIN=true npx --yes auth@latest migrate -y && cross-env DB_USE_ADMIN=true node db/migrate-guest-auth.js",
     "auth:seed": "node db/seed-auth.js",
     "api:test": "node scripts/api-tests.js",
     "test": "npm run db:test-triggers && npm run api:test",
