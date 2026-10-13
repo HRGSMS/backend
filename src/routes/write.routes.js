@@ -343,7 +343,9 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
         [taxId],
       );
       if (taxRows.length && taxRows[0].branch_id !== bookingBranchId) {
-        throw validationError('Selected tax rate does not match the hotel branch of the booked rooms');
+        throw validationError(
+          'Selected tax rate does not match the hotel branch of the booked rooms',
+        );
       }
     } else {
       const [branchTax] = await connection.execute(
@@ -370,7 +372,9 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
         [room.room_id, checkOut, checkIn],
       );
       if (conflicts.length) {
-        const error = new Error(`Room ${room.public_id} is already booked for the requested period`);
+        const error = new Error(
+          `Room ${room.public_id} is already booked for the requested period`,
+        );
         error.statusCode = 409;
         throw error;
       }
