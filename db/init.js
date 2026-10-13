@@ -6,10 +6,10 @@ const tableDefinitions = [
     CREATE TABLE IF NOT EXISTS \`guest\` (
       \`guest_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
-      \`first_name\` VARCHAR(20),
-      \`last_name\` VARCHAR(20),
-      \`email\` VARCHAR(30),
-      \`phone_number\` VARCHAR(20),
+      \`first_name\` VARCHAR(50) NOT NULL,
+      \`last_name\` VARCHAR(50) NOT NULL,
+      \`email\` VARCHAR(255) NOT NULL UNIQUE,
+      \`phone_number\` VARCHAR(30) NOT NULL,
       PRIMARY KEY (\`guest_id\`)
     )
   `,
@@ -17,7 +17,7 @@ const tableDefinitions = [
     CREATE TABLE IF NOT EXISTS \`branch\` (
       \`branch_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
-      \`name\` VARCHAR(100),
+      \`name\` VARCHAR(100) NOT NULL UNIQUE,
       \`location_city\` VARCHAR(100),
       PRIMARY KEY (\`branch_id\`)
     )
@@ -26,8 +26,8 @@ const tableDefinitions = [
     CREATE TABLE IF NOT EXISTS \`tax_rate\` (
       \`tax_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
-      \`rate\` DECIMAL(10, 2),
-      \`branch_id\` INT NOT NULL,
+      \`rate\` DECIMAL(10, 4) NOT NULL,
+      \`branch_id\` INT NOT NULL UNIQUE,
       PRIMARY KEY (\`tax_id\`),
       FOREIGN KEY (\`branch_id\`) REFERENCES \`branch\`(\`branch_id\`)
     )
@@ -37,12 +37,12 @@ const tableDefinitions = [
       \`booking_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
       \`guest_id\` INT NOT NULL,
-      \`booking_time\` DATETIME,
-      \`check_in_time\` DATETIME,
-      \`check_out_time\` DATETIME,
+      \`booking_time\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`check_in_time\` DATETIME NOT NULL,
+      \`check_out_time\` DATETIME NOT NULL,
       \`cancellation_time\` DATETIME,
-      \`booking_status\` VARCHAR(15),
-      \`payment_status\` VARCHAR(20),
+      \`booking_status\` VARCHAR(15) NOT NULL DEFAULT 'Booked',
+      \`payment_status\` VARCHAR(20) NOT NULL DEFAULT 'Unpaid',
       \`total_charge\` DECIMAL(10, 2),
       \`outstanding_amount\` DECIMAL(10, 2),
       \`tax_id\` INT,
@@ -63,9 +63,9 @@ const tableDefinitions = [
       \`payment_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
       \`booking_id\` INT NOT NULL,
-      \`payment_date\` DATETIME,
-      \`payment_method\` VARCHAR(20),
-      \`amount\` DECIMAL(10, 2),
+      \`payment_date\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`payment_method\` VARCHAR(20) NOT NULL,
+      \`amount\` DECIMAL(10, 2) NOT NULL,
       PRIMARY KEY (\`payment_id\`),
       FOREIGN KEY (\`booking_id\`) REFERENCES \`booking\`(\`booking_id\`)
     )
@@ -74,7 +74,7 @@ const tableDefinitions = [
     CREATE TABLE IF NOT EXISTS \`room_type\` (
       \`room_type_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
-      \`type_name\` VARCHAR(20),
+      \`type_name\` VARCHAR(50) NOT NULL UNIQUE,
       \`room_type_description\` VARCHAR(100),
       \`capacity\` INT,
       \`daily_rate\` DECIMAL(10, 2),
@@ -88,10 +88,11 @@ const tableDefinitions = [
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
       \`branch_id\` INT NOT NULL,
       \`room_type_id\` INT NOT NULL,
-      \`room_number\` VARCHAR(5),
-      \`current_status\` BOOLEAN,
-      \`booking_availability\` BOOLEAN,
+      \`room_number\` VARCHAR(10) NOT NULL,
+      \`current_status\` BOOLEAN NOT NULL DEFAULT 0,
+      \`booking_availability\` BOOLEAN NOT NULL DEFAULT 1,
       PRIMARY KEY (\`room_id\`),
+      UNIQUE KEY \`uq_branch_room_number\` (\`branch_id\`, \`room_number\`),
       FOREIGN KEY (\`room_type_id\`) REFERENCES \`room_type\`(\`room_type_id\`),
       FOREIGN KEY (\`branch_id\`) REFERENCES \`branch\`(\`branch_id\`)
     )
@@ -100,10 +101,10 @@ const tableDefinitions = [
     CREATE TABLE IF NOT EXISTS \`service_catalogue\` (
       \`service_id\` INT NOT NULL,
       \`public_id\` CHAR(36) NOT NULL UNIQUE DEFAULT (UUID()),
-      \`service_name\` VARCHAR(20),
+      \`service_name\` VARCHAR(50) NOT NULL UNIQUE,
       \`service_description\` VARCHAR(100),
-      \`current_price\` DECIMAL(10, 2),
-      \`price_update_time\` DATETIME,
+      \`current_price\` DECIMAL(10, 2) NOT NULL,
+      \`price_update_time\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       \`tax_id\` INT,
       PRIMARY KEY (\`service_id\`),
       FOREIGN KEY (\`tax_id\`) REFERENCES \`tax_rate\`(\`tax_id\`)
@@ -147,14 +148,13 @@ const tableDefinitions = [
       \`booking_id\` INT NOT NULL,
       \`service_id\` INT NOT NULL,
       \`room_id\` INT NOT NULL,
-      \`usage_time\` DATETIME,
-      \`quantity\` INT,
+      \`usage_time\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`quantity\` INT NOT NULL DEFAULT 1,
       \`price_at_usage\` DECIMAL(10, 2),
       \`tax_rate_at_usage\` DECIMAL(10, 4),
-      \`status\` VARCHAR(20) NOT NULL DEFAULT 'Pending',
+      \`status\` ENUM('Pending', 'Completed', 'Cancelled') NOT NULL DEFAULT 'Pending',
       PRIMARY KEY (\`usage_id\`),
-      FOREIGN KEY (\`room_id\`) REFERENCES \`room\`(\`room_id\`),
-      FOREIGN KEY (\`booking_id\`) REFERENCES \`booking\`(\`booking_id\`),
+      FOREIGN KEY (\`booking_id\`, \`room_id\`) REFERENCES \`booking_room\`(\`booking_id\`, \`room_id\`),
       FOREIGN KEY (\`service_id\`) REFERENCES \`service_catalogue\`(\`service_id\`)
     )
   `,
@@ -299,11 +299,15 @@ const viewDefinitions = [
       b.booking_status,
       b.payment_status,
       b.total_charge,
-      COALESCE(SUM(p.amount), 0) AS paid_amount,
-      b.total_charge - COALESCE(SUM(p.amount), 0) AS calculated_outstanding_amount
+      COALESCE(p.paid_amount, 0) AS paid_amount,
+      b.total_charge - COALESCE(p.paid_amount, 0) AS calculated_outstanding_amount
     FROM booking b
     JOIN guest g ON g.guest_id = b.guest_id
-    LEFT JOIN payment p ON p.booking_id = b.booking_id
+    LEFT JOIN (
+      SELECT booking_id, SUM(amount) AS paid_amount
+      FROM payment
+      GROUP BY booking_id
+    ) p ON p.booking_id = b.booking_id
     GROUP BY
       b.booking_id,
       b.public_id,
@@ -313,7 +317,8 @@ const viewDefinitions = [
       g.last_name,
       b.booking_status,
       b.payment_status,
-      b.total_charge
+      b.total_charge,
+      p.paid_amount
   `,
   `
     CREATE OR REPLACE VIEW \`report_service_usage\` AS
@@ -339,7 +344,7 @@ const viewDefinitions = [
   `,
   `
     CREATE OR REPLACE VIEW \`report_revenue\` AS
-    SELECT DISTINCT
+    SELECT
       br.public_id AS branch_public_id,
       br.branch_id,
       br.name AS branch_name,
@@ -347,11 +352,20 @@ const viewDefinitions = [
       b.public_id AS booking_public_id,
       b.check_in_time,
       b.check_out_time,
-      b.total_charge AS room_and_tax_revenue,
+      ROUND(
+        COALESCE((
+          SELECT SUM(br_inner.nightly_rate_at_booking * GREATEST(DATEDIFF(b.check_out_time, b.check_in_time), 1))
+          FROM booking_room br_inner
+          JOIN room r_inner ON r_inner.room_id = br_inner.room_id
+          WHERE br_inner.booking_id = b.booking_id AND r_inner.branch_id = br.branch_id
+        ), 0) * (1 + COALESCE(b.tax_rate_at_booking, 0)),
+        2
+      ) AS room_and_tax_revenue,
       COALESCE((
         SELECT SUM(su.quantity * su.price_at_usage)
         FROM service_usage su
-        WHERE su.booking_id = b.booking_id
+        JOIN room r_su ON r_su.room_id = su.room_id
+        WHERE su.booking_id = b.booking_id AND r_su.branch_id = br.branch_id
       ), 0) AS service_revenue
     FROM branch br
     JOIN room r ON r.branch_id = br.branch_id
@@ -359,6 +373,15 @@ const viewDefinitions = [
       ON booking_room_for_branch.room_id = r.room_id
     JOIN booking b ON b.booking_id = booking_room_for_branch.booking_id
     WHERE b.booking_status <> 'Cancelled'
+    GROUP BY
+      br.public_id,
+      br.branch_id,
+      br.name,
+      b.booking_id,
+      b.public_id,
+      b.check_in_time,
+      b.check_out_time,
+      b.tax_rate_at_booking
   `,
   `
     CREATE OR REPLACE VIEW \`report_top_services\` AS

@@ -381,36 +381,108 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
 });
 
 router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
+  let connection;
   try {
     const publicId = requiredString(req.params.publicId, 'public_id', 36);
-    const updates = [];
-    const values = [];
-    if (req.body?.booking_status !== undefined) {
-      if (!['Booked', 'Checked-In', 'Checked-Out', 'Cancelled'].includes(req.body.booking_status)) {
-        throw validationError('Invalid booking_status');
-      }
-      updates.push('booking_status = ?');
-      values.push(req.body.booking_status);
-      if (req.body.booking_status === 'Cancelled')
-        updates.push('cancellation_time = CURRENT_TIMESTAMP');
-    }
-    if (req.body?.check_in_time !== undefined) {
-      updates.push('check_in_time = ?');
-      values.push(requiredDate(req.body.check_in_time, 'check_in_time'));
-    }
-    if (req.body?.check_out_time !== undefined) {
-      updates.push('check_out_time = ?');
-      values.push(requiredDate(req.body.check_out_time, 'check_out_time'));
-    }
-    if (!updates.length) throw validationError('At least one booking field is required');
-    const [result] = await pool.execute(
-      `UPDATE booking SET ${updates.join(', ')} WHERE public_id = ?`,
-      [...values, publicId],
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [bookings] = await connection.execute(
+      'SELECT booking_id, booking_status, check_in_time, check_out_time, outstanding_amount, total_charge FROM booking WHERE public_id = ? FOR UPDATE',
+      [publicId],
     );
-    if (!result.affectedRows) {
+    if (!bookings.length) {
       res.status(404).json({ error: 'Booking not found' });
       return;
     }
+    const currentBooking = bookings[0];
+
+    const targetStatus = req.body?.booking_status;
+    const newCheckIn =
+      req.body?.check_in_time !== undefined
+        ? requiredDate(req.body.check_in_time, 'check_in_time')
+        : null;
+    const newCheckOut =
+      req.body?.check_out_time !== undefined
+        ? requiredDate(req.body.check_out_time, 'check_out_time')
+        : null;
+
+    const effectiveCheckIn = newCheckIn || currentBooking.check_in_time;
+    const effectiveCheckOut = newCheckOut || currentBooking.check_out_time;
+
+    if (new Date(effectiveCheckOut) <= new Date(effectiveCheckIn)) {
+      throw validationError('check_out_time must be after check_in_time');
+    }
+
+    if (targetStatus !== undefined) {
+      if (!['Booked', 'Checked-In', 'Checked-Out', 'Cancelled'].includes(targetStatus)) {
+        throw validationError('Invalid booking_status');
+      }
+      if (targetStatus === 'Checked-Out') {
+        await connection.execute('CALL sp_calculate_bill(?)', [currentBooking.booking_id]);
+        const [refreshed] = await connection.execute(
+          'SELECT outstanding_amount FROM booking WHERE booking_id = ?',
+          [currentBooking.booking_id],
+        );
+        if (Number(refreshed[0]?.outstanding_amount) > 0) {
+          const error = new Error(
+            'Cannot check out with outstanding dues. Total bill must be paid before checkout.',
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+      }
+    }
+
+    if (newCheckIn || newCheckOut) {
+      const [conflicts] = await connection.execute(
+        `SELECT 1
+         FROM booking_room br_this
+         JOIN booking_room br_other ON br_other.room_id = br_this.room_id AND br_other.booking_id <> ?
+         JOIN booking b_other ON b_other.booking_id = br_other.booking_id
+         WHERE br_this.booking_id = ?
+           AND b_other.booking_status IN ('Booked', 'Checked-In')
+           AND b_other.check_in_time < ?
+           AND b_other.check_out_time > ?
+         LIMIT 1`,
+        [currentBooking.booking_id, currentBooking.booking_id, effectiveCheckOut, effectiveCheckIn],
+      );
+      if (conflicts.length) {
+        const error = new Error('Room is already booked for the updated period');
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
+    const updates = [];
+    const values = [];
+    if (targetStatus !== undefined) {
+      updates.push('booking_status = ?');
+      values.push(targetStatus);
+      if (targetStatus === 'Cancelled') {
+        updates.push('cancellation_time = CURRENT_TIMESTAMP');
+      }
+    }
+    if (newCheckIn) {
+      updates.push('check_in_time = ?');
+      values.push(newCheckIn);
+    }
+    if (newCheckOut) {
+      updates.push('check_out_time = ?');
+      values.push(newCheckOut);
+    }
+    if (!updates.length) throw validationError('At least one booking field is required');
+
+    await connection.execute(`UPDATE booking SET ${updates.join(', ')} WHERE public_id = ?`, [
+      ...values,
+      publicId,
+    ]);
+
+    if (newCheckIn || newCheckOut || targetStatus === 'Checked-Out') {
+      await connection.execute('CALL sp_calculate_bill(?)', [currentBooking.booking_id]);
+    }
+
+    await connection.commit();
     notifyStaff({
       type: 'booking.updated',
       message: 'A booking was updated',
@@ -418,7 +490,14 @@ router.patch('/bookings/:publicId', staffRoles, async (req, res, next) => {
     });
     res.json({ data: { public_id: publicId, updated: true } });
   } catch (error) {
-    next(error);
+    if (connection) await connection.rollback();
+    if (error.statusCode) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    handleDatabaseError(error, res, next);
+  } finally {
+    connection?.release();
   }
 });
 

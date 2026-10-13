@@ -7,16 +7,16 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "db:init": "DB_USE_ADMIN=true node db/migrate.js",
+    "db:init": "cross-env DB_USE_ADMIN=true node db/migrate.js",
     "db:seed": "node db/seed.js",
     "db:destroy": "node db/destroy.js",
     "db:recreate": "node db/recreate.js && npm run db:init && npm run auth:migrate && npm run db:seed && npm run auth:seed",
-    "db:test-triggers": "DB_USE_ADMIN=true node db/test-triggers.js",
-    "auth:migrate": "DB_USE_ADMIN=true npx auth@latest migrate && DB_USE_ADMIN=true node db/migrate-guest-auth.js",
+    "db:test-triggers": "cross-env DB_USE_ADMIN=true node db/test-triggers.js",
+    "auth:migrate": "cross-env DB_USE_ADMIN=true npx auth@latest migrate && cross-env DB_USE_ADMIN=true node db/migrate-guest-auth.js",
     "auth:seed": "node db/seed-auth.js",
     "api:test": "node scripts/api-tests.js",
     "test": "npm run db:test-triggers && npm run api:test",
-    "migrate": "DB_USE_ADMIN=true node db/migrate.js",
+    "migrate": "cross-env DB_USE_ADMIN=true node db/migrate.js",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\""
@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "cross-env": "^10.1.0",
     "eslint": "^10.10.0",
     "globals": "^17.12.0",
     "nodemon": "^1.14.10",
