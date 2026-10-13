@@ -122,6 +122,7 @@ jobs:
           script_stop: true
           script: |
             echo "==> Deploying Backend to Oracle Cloud VPS..."
+            export PATH="/usr/local/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)/bin:$PATH"
             cd /var/www/hrgsms/backend
 
             # 1. Fetch latest changes
