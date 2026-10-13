@@ -25,6 +25,14 @@ function positiveNumber(value, name) {
   return number;
 }
 
+function requiredDate(value, name) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) {
+    throw badRequest(`${name} must be a valid date`);
+  }
+  return date;
+}
+
 async function nextId(connection, table, column) {
   const [rows] = await connection.execute(
     `SELECT COALESCE(MAX(\`${column}\`), 0) + 1 AS next_id FROM \`${table}\` FOR UPDATE`,
@@ -78,11 +86,13 @@ router.get('/bookings', async (req, res, next) => {
 router.post('/bookings', async (req, res, next) => {
   let connection;
   try {
-    const checkIn = req.body?.check_in_time;
-    const checkOut = req.body?.check_out_time;
-    if (!checkIn || !checkOut || new Date(checkOut) <= new Date(checkIn)) {
+    const checkInDate = requiredDate(req.body?.check_in_time, 'check_in_time');
+    const checkOutDate = requiredDate(req.body?.check_out_time, 'check_out_time');
+    if (checkOutDate <= checkInDate) {
       throw badRequest('check_in_time and check_out_time must be valid and ordered');
     }
+    const checkIn = checkInDate.toISOString().slice(0, 19).replace('T', ' ');
+    const checkOut = checkOutDate.toISOString().slice(0, 19).replace('T', ' ');
     if (!Array.isArray(req.body?.room_public_ids) || !req.body.room_public_ids.length) {
       throw badRequest('room_public_ids must contain at least one UUID');
     }
@@ -116,13 +126,23 @@ router.post('/bookings', async (req, res, next) => {
         [bookingId, rooms[0].room_id],
       );
     }
+    await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
+    const [bookingRows] = await connection.execute(
+      `SELECT total_charge, outstanding_amount, total_tax_amount, payment_status
+       FROM booking WHERE booking_id = ?`,
+      [bookingId],
+    );
     await connection.commit();
     notifyStaff({
       type: 'booking.created',
       message: 'A guest created a reservation',
-      data: { public_id: publicId, guest_public_id: req.guest.public_id },
+      data: {
+        public_id: publicId,
+        guest_public_id: req.guest.public_id,
+        payment_status: bookingRows[0].payment_status,
+      },
     });
-    res.status(201).json({ data: { public_id: publicId } });
+    res.status(201).json({ data: { public_id: publicId, ...bookingRows[0] } });
   } catch (error) {
     if (connection) await connection.rollback();
     next(error);

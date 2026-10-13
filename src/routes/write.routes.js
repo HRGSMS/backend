@@ -34,7 +34,7 @@ function requiredDate(value, name) {
   if (!value || Number.isNaN(date.getTime())) {
     throw validationError(`${name} must be a valid date`);
   }
-  return value;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 function handleDatabaseError(error, res, next) {
@@ -307,6 +307,10 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
     const guestPublicId = requiredString(req.body?.guest_public_id, 'guest_public_id', 36);
     const checkIn = requiredDate(req.body?.check_in_time, 'check_in_time');
     const checkOut = requiredDate(req.body?.check_out_time, 'check_out_time');
+    const initialPaymentOption = req.body?.initial_payment_option ?? 'pending';
+    if (!['full', 'partial', 'pending'].includes(initialPaymentOption)) {
+      throw validationError('initial_payment_option must be full, partial, or pending');
+    }
     if (new Date(checkOut) <= new Date(checkIn))
       throw validationError('check_out_time must be after check_in_time');
     if (!Array.isArray(req.body?.room_public_ids) || !req.body.room_public_ids.length) {
@@ -351,14 +355,47 @@ router.post('/bookings', staffRoles, async (req, res, next) => {
         [bookingId, rooms[0].room_id],
       );
     }
+    await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
+    const [billRows] = await connection.execute(
+      `SELECT total_charge FROM booking WHERE booking_id = ?`,
+      [bookingId],
+    );
+    const totalCharge = Number(billRows[0].total_charge);
+    let initialPaymentAmount = 0;
+    if (initialPaymentOption === 'full') initialPaymentAmount = totalCharge;
+    if (initialPaymentOption === 'partial') {
+      initialPaymentAmount = Math.round((totalCharge / 2) * 100) / 100;
+    }
+    if (initialPaymentAmount > 0) {
+      const paymentId = await nextId(connection, 'payment', 'payment_id');
+      await connection.execute(
+        `INSERT INTO payment (payment_id, booking_id, payment_date, payment_method, amount)
+         VALUES (?, ?, CURRENT_TIMESTAMP, 'Credit Card', ?)`,
+        [paymentId, bookingId, initialPaymentAmount],
+      );
+      await connection.execute('CALL sp_calculate_bill(?)', [bookingId]);
+    }
+    const [bookingRows] = await connection.execute(
+      `SELECT total_charge, outstanding_amount, total_tax_amount, payment_status
+       FROM booking WHERE booking_id = ?`,
+      [bookingId],
+    );
     await connection.commit();
     notifyStaff({
       type: 'booking.created',
       message: 'A booking was created',
-      data: { public_id: publicId, booking_status: status },
+      data: {
+        public_id: publicId,
+        booking_status: status,
+        payment_status: bookingRows[0].payment_status,
+      },
     });
     res.status(201).json({
-      data: { public_id: publicId, booking_status: status },
+      data: {
+        public_id: publicId,
+        booking_status: status,
+        ...bookingRows[0],
+      },
     });
   } catch (error) {
     if (connection) await connection.rollback();
