@@ -426,7 +426,9 @@ router.post('/bookings/:publicId/payments', async (req, res, next) => {
     const smsMessage = `SkyNest Hotels: Dear ${guestName}, your payment of LKR ${amount.toLocaleString()} for Reservation #${shortRef} has been successfully processed. Status: ${statusNote}. Thank you for staying with SkyNest Hotels!`;
 
     // Simulated SMS Gateway Dispatch
-    console.log(`[SMS Gateway] Dispatched payment confirmation to ${recipientPhone || 'registered phone'}: "${smsMessage}"`);
+    console.log(
+      `[SMS Gateway] Dispatched payment confirmation to ${recipientPhone || 'registered phone'}: "${smsMessage}"`,
+    );
 
     notifyStaff({
       type: 'payment.created',
