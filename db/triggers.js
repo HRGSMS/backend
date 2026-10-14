@@ -7,7 +7,7 @@ const calculateBill = `
   BEGIN
     DECLARE v_status VARCHAR(15);
     DECLARE v_nights INT;
-    DECLARE v_rate DECIMAL(10,4) DEFAULT 0;
+    DECLARE v_rate DECIMAL(6,4) DEFAULT 0;
     DECLARE v_room DECIMAL(14,2) DEFAULT 0;
     DECLARE v_service DECIMAL(14,2) DEFAULT 0;
     DECLARE v_tax DECIMAL(14,2) DEFAULT 0;
@@ -73,7 +73,7 @@ const cancelBooking = `
     DECLARE v_rule INT;
     DECLARE v_type VARCHAR(20);
     DECLARE v_value DECIMAL(12,4);
-    DECLARE v_rate DECIMAL(10,4);
+    DECLARE v_rate DECIMAL(6,4);
     DECLARE v_services BOOLEAN;
     DECLARE v_nightly DECIMAL(14,2);
     DECLARE v_fee DECIMAL(14,2);
