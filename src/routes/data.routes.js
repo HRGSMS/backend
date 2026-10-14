@@ -5,6 +5,8 @@ import { notifyStaff } from '../sockets/index.js';
 
 const router = Router();
 const staffRoles = requireRole('admin', 'manager', 'front_desk');
+const managementRoles = requireRole('admin', 'manager');
+const allStaffRoles = requireRole('admin', 'manager', 'front_desk', 'service_staff');
 
 router.use((req, res, next) => {
   const identifierQuery = Object.keys(req.query).find(
@@ -188,6 +190,102 @@ router.get('/hotel-config', async (req, res, next) => {
     // Convert rows to a flat key→value object for easy frontend consumption
     const config = Object.fromEntries(rows.map((r) => [r.config_key, r.config_value]));
     res.json({ data: config });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /management/settings
+ * Returns system settings for management and staff dashboards.
+ * Accessible by all hotel staff roles.
+ */
+router.get('/management/settings', allStaffRoles, async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute('SELECT config_key, config_value FROM hotel_config');
+    const config = Object.fromEntries(rows.map((r) => [r.config_key, r.config_value]));
+
+    const settings = {
+      hotelName: config.hotel_name || '',
+      contactEmail: config.contact_email || 'contact@skynest.page',
+      contactPhone: config.hotline_number || config.contact_phone || '',
+      checkInTime: config.checkin_time || '14:00',
+      checkOutTime: config.checkout_time || '11:00',
+      revision: Number.parseInt(config.settings_revision || '1', 10) || 1,
+    };
+
+    res.json({ data: settings });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /management/settings
+ * Updates hotel operational settings in hotel_config table.
+ * Restricted to administrators and managers.
+ */
+router.put('/management/settings', managementRoles, async (req, res, next) => {
+  try {
+    const { hotelName, contactEmail, contactPhone, checkInTime, checkOutTime, revision } =
+      req.body || {};
+
+    if (!hotelName || typeof hotelName !== 'string' || !hotelName.trim()) {
+      const error = new Error('Hotel name is required');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!contactEmail || typeof contactEmail !== 'string' || !contactEmail.trim()) {
+      const error = new Error('Contact email is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const nextRevision = (Number.parseInt(revision, 10) || 0) + 1;
+
+    const updates = [
+      ['hotel_name', hotelName.trim(), 'Public hotel brand name'],
+      ['contact_email', contactEmail.trim(), 'Hotel contact email address'],
+      ['hotline_number', (contactPhone || '').trim(), 'Public customer hotline number'],
+      ['checkin_time', (checkInTime || '14:00').trim(), 'Standard check-in time of day'],
+      ['checkout_time', (checkOutTime || '11:00').trim(), 'Standard check-out time of day'],
+      ['settings_revision', String(nextRevision), 'Settings modification revision counter'],
+    ];
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const [key, value, desc] of updates) {
+        await connection.execute(
+          `INSERT INTO hotel_config (config_key, config_value, description)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), description = COALESCE(VALUES(description), description)`,
+          [key, value, desc],
+        );
+      }
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+
+    const updatedSettings = {
+      hotelName: hotelName.trim(),
+      contactEmail: contactEmail.trim(),
+      contactPhone: (contactPhone || '').trim(),
+      checkInTime: (checkInTime || '14:00').trim(),
+      checkOutTime: (checkOutTime || '11:00').trim(),
+      revision: nextRevision,
+    };
+
+    notifyStaff({
+      type: 'settings:updated',
+      settings: updatedSettings,
+    });
+
+    res.json({ data: updatedSettings });
   } catch (error) {
     next(error);
   }
