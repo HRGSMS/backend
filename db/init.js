@@ -473,8 +473,7 @@ export async function initializeDatabase(database = pool) {
     for (const definition of tableDefinitions) {
       await connection.query(definition);
     }
-    await ensureGuestAuthLink(connection);
-    await ensureServiceUsageStatus(connection);
+    await ensureSchemaCompatibility(connection);
     await installTriggers(connection);
 
     for (const definition of viewDefinitions) {
