@@ -35,6 +35,7 @@ Built with **Node.js**, **Express**, **MySQL 8.0**, **Better Auth**, and **Socke
    - [Service Catalogue & Requests](#service-catalogue--requests)
    - [Guest Self-Service Portal (`/api/guest`)](#guest-self-service-portal-apiguest)
    - [Management & Analytical Reports (`/api/reports`)](#management--analytical-reports-apireports)
+   - [Hotel Management Settings (`/api/management/settings`)](#hotel-management-settings-apimanagementsettings)
 8. [Real-Time Staff Notifications (WebSockets)](#real-time-staff-notifications-websockets)
 9. [Testing & Quality Assurance](#testing--quality-assurance)
 
@@ -547,6 +548,48 @@ GET /api/reports/top-services
 
 ---
 
+### Hotel Management Settings (`/api/management/settings`)
+
+Endpoints for reading and modifying operational hotel parameters (standard check-in/out times, contact details, hotel name), backed by the `hotel_config` table:
+
+#### 1. Get Operational Settings
+```http
+GET /api/management/settings
+```
+*Roles:* `admin`, `manager`, `front_desk`, `service_staff`  
+*Response:*
+```json
+{
+  "data": {
+    "hotelName": "SkyNest Hotels",
+    "contactEmail": "contact@skynest.page",
+    "contactPhone": "0760218879",
+    "checkInTime": "14:00",
+    "checkOutTime": "11:00",
+    "revision": 1
+  }
+}
+```
+
+#### 2. Update Operational Settings
+```http
+PUT /api/management/settings
+Content-Type: application/json
+
+{
+  "hotelName": "SkyNest Hotels",
+  "contactEmail": "admin@skynest.page",
+  "contactPhone": "0760218879",
+  "checkInTime": "14:00",
+  "checkOutTime": "11:00",
+  "revision": 1
+}
+```
+*Roles:* `admin`, `manager`  
+*Action:* Executes an atomic MySQL transaction with `ON DUPLICATE KEY UPDATE` across `hotel_config`, increments the `settings_revision` counter for optimistic concurrency, and broadcasts a `settings:updated` event to staff clients over WebSockets.
+
+---
+
 ## Real-Time Staff Notifications (WebSockets)
 
 Staff dashboards receive real-time notifications via **Socket.io**. Connect with credentials:
@@ -577,6 +620,7 @@ socket.on('notification', ({ type, message, data }) => {
 | `service_request.cancelled` | Service request cancelled |
 | `guest.created`, `guest.updated`, `guest.deleted` | Guest profile changes |
 | `service_catalogue.created`, `updated`, `deleted` | Catalogue modifications |
+| `settings:updated` | Hotel management settings updated |
 
 ---
 
