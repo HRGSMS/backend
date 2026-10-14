@@ -196,7 +196,7 @@ const bookings = [
     '2026-12-18 11:00:00',
     '2026-10-04 10:00:00',
     'Cancelled',
-    'Refunded',
+    'Paid',
     0,
     0,
     3,
