@@ -41,8 +41,8 @@ const tableDefinitions = [
       \`check_in_time\` DATETIME NOT NULL,
       \`check_out_time\` DATETIME NOT NULL,
       \`cancellation_time\` DATETIME,
-      \`booking_status\` VARCHAR(15) NOT NULL DEFAULT 'Booked',
-      \`payment_status\` VARCHAR(20) NOT NULL DEFAULT 'Unpaid',
+      \`booking_status\` ENUM('Booked', 'Checked-In', 'Checked-Out', 'Cancelled') NOT NULL DEFAULT 'Booked',
+      \`payment_status\` ENUM('Unpaid', 'Partially Paid', 'Paid', 'Credit Due') NOT NULL DEFAULT 'Unpaid',
       \`total_charge\` DECIMAL(10, 2),
       \`outstanding_amount\` DECIMAL(10, 2),
       \`tax_id\` INT,
@@ -151,11 +151,13 @@ const tableDefinitions = [
       \`usage_time\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       \`quantity\` INT NOT NULL DEFAULT 1,
       \`price_at_usage\` DECIMAL(10, 2),
+      \`tax_id\` INT,
       \`tax_rate_at_usage\` DECIMAL(6, 4),
       \`status\` ENUM('Pending', 'Completed', 'Cancelled') NOT NULL DEFAULT 'Pending',
       PRIMARY KEY (\`usage_id\`),
       FOREIGN KEY (\`booking_id\`, \`room_id\`) REFERENCES \`booking_room\`(\`booking_id\`, \`room_id\`),
-      FOREIGN KEY (\`service_id\`) REFERENCES \`service_catalogue\`(\`service_id\`)
+      FOREIGN KEY (\`service_id\`) REFERENCES \`service_catalogue\`(\`service_id\`),
+      FOREIGN KEY (\`tax_id\`) REFERENCES \`tax_rate\`(\`tax_id\`)
     )
   `,
   `

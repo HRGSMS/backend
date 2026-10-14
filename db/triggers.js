@@ -223,9 +223,11 @@ const validationTriggers = [
     IF NEW.price_at_usage IS NULL THEN
       SET NEW.price_at_usage = (SELECT current_price FROM service_catalogue WHERE service_id = NEW.service_id);
     END IF;
+    IF NEW.tax_id IS NULL THEN
+      SET NEW.tax_id = (SELECT tax_id FROM service_catalogue WHERE service_id = NEW.service_id);
+    END IF;
     IF NEW.tax_rate_at_usage IS NULL THEN
-      SET NEW.tax_rate_at_usage = COALESCE((SELECT t.rate FROM service_catalogue s
-        LEFT JOIN tax_rate t ON t.tax_id = s.tax_id WHERE s.service_id = NEW.service_id), 0);
+      SET NEW.tax_rate_at_usage = COALESCE((SELECT rate FROM tax_rate WHERE tax_id = NEW.tax_id), 0);
     END IF;
     IF NEW.price_at_usage IS NULL OR NEW.price_at_usage < 0
       OR NEW.tax_rate_at_usage < 0 OR NEW.tax_rate_at_usage > 1 THEN

@@ -142,12 +142,12 @@ async function testTriggerValidation() {
         [998, 997, 1, 101, 2], // price_at_usage = NULL will trigger auto-population
       );
       const [rows] = await connection.execute(
-        'SELECT price_at_usage, tax_rate_at_usage FROM service_usage WHERE usage_id = 998',
+        'SELECT price_at_usage, tax_id, tax_rate_at_usage FROM service_usage WHERE usage_id = 998',
       );
       logTest(
         'service_usage: price_at_usage & tax_rate_at_usage auto-populated',
-        rows[0].price_at_usage > 0 && rows[0].tax_rate_at_usage >= 0,
-        `price: ${rows[0].price_at_usage}, tax: ${rows[0].tax_rate_at_usage}`,
+        rows[0].price_at_usage > 0 && rows[0].tax_id !== null && rows[0].tax_rate_at_usage >= 0,
+        `price: ${rows[0].price_at_usage}, tax_id: ${rows[0].tax_id}, tax: ${rows[0].tax_rate_at_usage}`,
       );
     } catch (e) {
       logTest(
