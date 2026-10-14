@@ -34,7 +34,7 @@ export function createApp() {
   app.use(corsMiddleware);
 
   app.use('/api/auth/guest-sign-up', express.json(), guestAuthRoutes);
-  app.use('/api/auth', express.json(), authRecoveryRoutes);
+  app.use('/api/auth', authRecoveryRoutes);
 
   // Better Auth must receive the raw request body before JSON parsing.
   app.all('/api/auth/*splat', toNodeHandler(auth));

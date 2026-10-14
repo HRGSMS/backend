@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, json } from 'express';
 import { pool } from '../config/db.js';
 import { auth } from '../lib/auth.js';
 
@@ -17,7 +17,7 @@ function validationError(message, statusCode = 400) {
  * password reset workflow, and retrieves the generated verification token
  * from the database verification table.
  */
-router.post('/forgot-password', async (req, res, next) => {
+router.post('/forgot-password', json(), async (req, res, next) => {
   try {
     const email = req.body?.email;
     if (typeof email !== 'string' || !email.trim()) {
@@ -77,7 +77,7 @@ router.post('/forgot-password', async (req, res, next) => {
  * applies the new password to account table via Better Auth,
  * and clears the token.
  */
-router.post('/reset-password-direct', async (req, res, next) => {
+router.post('/reset-password-direct', json(), async (req, res, next) => {
   try {
     const token = req.body?.token;
     const newPassword = req.body?.newPassword;

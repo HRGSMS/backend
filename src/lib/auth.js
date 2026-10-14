@@ -2,7 +2,8 @@ import { betterAuth } from 'better-auth';
 import { admin } from 'better-auth/plugins';
 import { pool } from '../config/db.js';
 
-const baseURL = process.env.BETTER_AUTH_URL || `http://localhost:${process.env.PORT || 4000}`;
+const rawBaseURL = process.env.BETTER_AUTH_URL || `http://localhost:${process.env.PORT || 4000}`;
+const baseURL = rawBaseURL.replace(/\/api(\/auth)?\/?$/, '').replace(/\/+$/, '');
 const secureCookies =
   process.env.COOKIE_SECURE === 'true' ||
   process.env.NODE_ENV === 'production' ||
@@ -18,7 +19,11 @@ export const authOptions = {
   database: pool,
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL,
-  trustedOrigins: ['*'],
+  trustedOrigins: [
+    baseURL,
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.replace(/\/+$/, '')] : []),
+    '*',
+  ],
   advanced: {
     // Cross-site cookie support for HTTPS/production while preserving local HTTP
     useSecureCookies: secureCookies,
