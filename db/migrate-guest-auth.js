@@ -1,5 +1,40 @@
+import { fileURLToPath } from 'url';
 import { pool } from '../src/config/db.js';
-import { ensureGuestAuthLink } from './init.js';
+
+/**
+ * Ensures Better Auth users can link to the existing guest.public_id value.
+ *
+ * Better Auth owns the user table, so this is intentionally idempotent and
+ * only runs when that table already exists.
+ *
+ * @param {import('mysql2/promise').PoolConnection} connection Database connection.
+ * @returns {Promise<void>} Resolves after the link column is available.
+ */
+export async function ensureGuestAuthLink(connection) {
+  const [tables] = await connection.execute(
+    `SELECT 1
+     FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'user'`,
+  );
+
+  if (!tables.length) {
+    return;
+  }
+
+  const [columns] = await connection.execute(
+    `SELECT 1
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'user'
+       AND COLUMN_NAME = 'guestPublicId'`,
+  );
+
+  if (!columns.length) {
+    await connection.query('ALTER TABLE `user` ADD COLUMN `guestPublicId` CHAR(36) NULL');
+    console.log('Added Better Auth user.guestPublicId link column');
+  }
+}
 
 /**
  * Adds the Better Auth user field used to link guest accounts to hotel guests.
@@ -18,7 +53,9 @@ async function migrateGuestAuth() {
   }
 }
 
-migrateGuestAuth().catch((error) => {
-  console.error('Guest authentication migration failed:', error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  migrateGuestAuth().catch((error) => {
+    console.error('Guest authentication migration failed:', error.message);
+    process.exitCode = 1;
+  });
+}

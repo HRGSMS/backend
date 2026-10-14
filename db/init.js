@@ -171,9 +171,8 @@ const tableDefinitions = [
       CHECK (\`minimum_notice_hours\` >= 0),
       CHECK (\`fee_value\` >= 0),
       CHECK (\`fee_type\` <> 'percentage' OR \`fee_value\` <= 1),
-      CHECK (\`tax_rate\` BETWEEN 0 AND 1),
-      CHECK (\`charge_services\` IN (0, 1))
-    ) ENGINE=InnoDB
+      CHECK (\`tax_rate\` BETWEEN 0 AND 1)
+    )
   `,
   `
     CREATE TABLE IF NOT EXISTS \`notification_outbox\` (
@@ -188,7 +187,7 @@ const tableDefinitions = [
       \`last_error\` VARCHAR(255) NULL,
       FOREIGN KEY (\`booking_id\`) REFERENCES \`booking\`(\`booking_id\`),
       INDEX \`pending_notifications\` (\`delivered_at\`, \`available_at\`)
-    ) ENGINE=InnoDB
+    )
   `,
   `
     CREATE TABLE IF NOT EXISTS \`hotel_config\` (
@@ -204,129 +203,11 @@ const tableDefinitions = [
       \`public_id\`    CHAR(36)     NOT NULL UNIQUE DEFAULT (UUID()),
       \`method_name\`  VARCHAR(60)  NOT NULL UNIQUE,
       \`display_name\` VARCHAR(80)  NOT NULL,
-      \`is_active\`    TINYINT(1)   NOT NULL DEFAULT 1,
+      \`is_active\`    BOOLEAN      NOT NULL DEFAULT 1,
       PRIMARY KEY (\`method_id\`)
     )
   `,
 ];
-
-/**
- * Ensures Better Auth users can link to the existing guest.public_id value.
- *
- * Better Auth owns the user table, so this is intentionally idempotent and
- * only runs when that table already exists.
- *
- * @param {import('mysql2/promise').PoolConnection} connection Database connection.
- * @returns {Promise<void>} Resolves after the link column is available.
- */
-export async function ensureGuestAuthLink(connection) {
-  const [tables] = await connection.execute(
-    `SELECT 1
-     FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'user'`,
-  );
-
-  if (!tables.length) {
-    return;
-  }
-
-  const [columns] = await connection.execute(
-    `SELECT 1
-     FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'user'
-       AND COLUMN_NAME = 'guestPublicId'`,
-  );
-
-  if (!columns.length) {
-    await connection.query('ALTER TABLE `user` ADD COLUMN `guestPublicId` CHAR(36) NULL');
-    console.log('Added Better Auth user.guestPublicId link column');
-  }
-}
-
-/**
- * Ensures the status column exists in service_usage.
- *
- * @param {import('mysql2/promise').PoolConnection} connection
- * @returns {Promise<void>}
- */
-export async function ensureServiceUsageStatus(connection) {
-  const [columns] = await connection.execute(
-    `SELECT 1
-     FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'service_usage'
-       AND COLUMN_NAME = 'status'`,
-  );
-
-  if (!columns.length) {
-    await connection.query(
-      "ALTER TABLE `service_usage` ADD COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'Pending'",
-    );
-    console.log('Added status column to service_usage');
-  }
-}
-
-/**
- * Ensures runtime compatibility for tables, columns, and default configs.
- * Idempotent: safe to run on every server startup.
- *
- * @param {import('mysql2/promise').PoolConnection} connection Database connection.
- * @returns {Promise<void>}
- */
-export async function ensureSchemaCompatibility(connection) {
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS \`hotel_config\` (
-      \`config_key\`   VARCHAR(80)   NOT NULL,
-      \`config_value\` VARCHAR(255)  NOT NULL,
-      \`description\`  VARCHAR(255)  NULL,
-      PRIMARY KEY (\`config_key\`)
-    )
-  `);
-
-  const [configRows] = await connection.execute('SELECT COUNT(*) AS cnt FROM `hotel_config`');
-  if (configRows[0].cnt === 0) {
-    await connection.query(`
-      INSERT INTO \`hotel_config\` (config_key, config_value, description) VALUES
-        ('hotel_name', 'SkyNest Hotels', 'Display name shown across the portal and emails'),
-        ('hotel_tagline', 'Luxury Stays & Serenity', 'Brand tagline displayed in hero headers'),
-        ('hotel_description', 'Discover tailored comfort across our Sri Lanka locations. Book with flexible half-payments and personalise your stay.', 'Overview blurb displayed on the public rooms page'),
-        ('hotline_number', '0760218879', 'Contact phone number displayed to guests'),
-        ('hotline_label', '24/7 Hotel Hotline', 'Label rendered alongside the hotline phone number'),
-        ('checkin_time', '14:00', 'Standard check-in time of day'),
-        ('checkout_time', '11:00', 'Standard check-out time of day'),
-        ('currency', 'LKR', 'Three-letter currency symbol for billing displays'),
-        ('copyright_text', 'Dedicated to comfort, elegance, and peace.', 'Footer note displayed across public guest views')
-      ON DUPLICATE KEY UPDATE config_value = config_value
-    `);
-  }
-
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS \`payment_method\` (
-      \`method_id\`    INT          NOT NULL AUTO_INCREMENT,
-      \`public_id\`    CHAR(36)     NOT NULL UNIQUE DEFAULT (UUID()),
-      \`method_name\`  VARCHAR(60)  NOT NULL UNIQUE,
-      \`display_name\` VARCHAR(80)  NOT NULL,
-      \`is_active\`    TINYINT(1)   NOT NULL DEFAULT 1,
-      PRIMARY KEY (\`method_id\`)
-    )
-  `);
-
-  const [pmRows] = await connection.execute('SELECT COUNT(*) AS cnt FROM `payment_method`');
-  if (pmRows[0].cnt === 0) {
-    await connection.query(`
-      INSERT INTO \`payment_method\` (public_id, method_name, display_name, is_active) VALUES
-        (UUID(), 'Credit Card',     'Credit / Debit Card',   1),
-        (UUID(), 'Online Transfer', 'Online Bank Transfer',  1),
-        (UUID(), 'Cash Deposit',    'Direct Deposit',        1)
-      ON DUPLICATE KEY UPDATE method_name = method_name
-    `);
-  }
-
-  await ensureGuestAuthLink(connection);
-  await ensureServiceUsageStatus(connection);
-}
 
 const viewDefinitions = [
   `
@@ -475,7 +356,6 @@ export async function initializeDatabase(database = pool) {
     for (const definition of tableDefinitions) {
       await connection.query(definition);
     }
-    await ensureSchemaCompatibility(connection);
     await installTriggers(connection);
 
     for (const definition of viewDefinitions) {

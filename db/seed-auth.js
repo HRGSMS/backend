@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { pool } from '../src/config/db.js';
 import { authOptions } from '../src/lib/auth.js';
-import { ensureGuestAuthLink } from './init.js';
+import { ensureGuestAuthLink } from './migrate-guest-auth.js';
 
 const staffAccounts = [
   ['Admin', 'admin@hotel.com', 'admin123', 'admin'],
